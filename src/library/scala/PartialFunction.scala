@@ -46,7 +46,7 @@ package scala
  *  @author  Martin Odersky
  *  @version 1.0, 16/07/2003
  */
-trait PartialFunction[-A, +B] extends (A => B) {
+trait PartialFunction[-A, +B] extends (A => B) { self =>
 
   /** Checks if a value is contained in the function's domain.
    *
@@ -54,10 +54,6 @@ trait PartialFunction[-A, +B] extends (A => B) {
    *  @return `'''true'''`, iff `x` is in the domain of this function, `'''false'''` otherwise.
    */
   def isDefinedAt(x: A): Boolean
-
-  //protected def missingCase[A1 <: A, B1 >: B]: PartialFunction[A1, B1] = PartialFunction.empty
-
-  protected def missingCase(x: A): B = throw new MatchError(x)
 
   /** Composes this partial function with a fallback partial function which
    *  gets applied where this partial function is not defined.
@@ -71,15 +67,9 @@ trait PartialFunction[-A, +B] extends (A => B) {
    */
   def orElse[A1 <: A, B1 >: B](that: PartialFunction[A1, B1]) : PartialFunction[A1, B1] =
     new runtime.AbstractPartialFunction[A1, B1] {
-      def _isDefinedAt(x: A1): Boolean =
-        PartialFunction.this.isDefinedAt(x) || that.isDefinedAt(x)
-      def apply(x: A1): B1 =
-        if (PartialFunction.this.isDefinedAt(x)) PartialFunction.this.apply(x)
-        else that.apply(x)
+      def isDefinedAt(x: A1) = self.isDefinedAt(x) || that.isDefinedAt(x)
+      def apply(x: A1): B1 = if (self.isDefinedAt(x)) self(x) else that(x)
     }
-
-  def orElseFast[A1 <: A, B1 >: B](that: PartialFunction[A1, B1]) : PartialFunction[A1, B1] =
-    orElse(that)
 
   /**  Composes this partial function with a transformation function that
    *   gets applied to results of this partial function.
@@ -89,8 +79,8 @@ trait PartialFunction[-A, +B] extends (A => B) {
    *           arguments `x` to `k(this(x))`.
    */
   override def andThen[C](k: B => C) : PartialFunction[A, C] = new runtime.AbstractPartialFunction[A, C] {
-    def _isDefinedAt(x: A): Boolean = PartialFunction.this.isDefinedAt(x)
-    def apply(x: A): C = k(PartialFunction.this.apply(x))
+    def isDefinedAt(x: A): Boolean = self.isDefinedAt(x)
+    def apply(x: A): C = k(self.apply(x))
   }
 
   /** Turns this partial function into an plain function returning an `Option` result.
@@ -98,9 +88,12 @@ trait PartialFunction[-A, +B] extends (A => B) {
    *  @return  a function that takes an argument `x` to `Some(this(x))` if `this`
    *           is defined for `x`, and to `None` otherwise.
    */
-  def lift: A => Option[B] = (x: A) => (this orElse PartialFunction.fallback_pf).apply(x) match {
-    case PartialFunction.FallBackToken => None
-    case z => Some(z.asInstanceOf[B])
+  def lift: A => Option[B] = {
+    val pf = this orElse PartialFunction.fallback_pf
+    (x: A) => pf(x) match {
+      case PartialFunction.FallBackToken => None
+      case z => Some(z.asInstanceOf[B])
+    }
   }
 }
 
@@ -121,11 +114,9 @@ trait PartialFunction[-A, +B] extends (A => B) {
  */
 object PartialFunction {
   private[this] final val empty_pf: PartialFunction[Any, Nothing] = new runtime.AbstractPartialFunction[Any, Nothing] {
-    def _isDefinedAt(x: Any) = false
-    override def isDefinedAt(x: Any) = false
+    def isDefinedAt(x: Any) = false
     def apply(x: Any): Nothing = throw new MatchError(x)
     override def orElse[A1, B1](that: PartialFunction[A1, B1]): PartialFunction[A1, B1] = that
-    override def orElseFast[A1, B1](that: PartialFunction[A1, B1]): PartialFunction[A1, B1] = that
     override def lift = (x: Any) => None
   }
   def empty[A, B] : PartialFunction[A, B] = empty_pf
@@ -151,14 +142,12 @@ object PartialFunction {
    *  @param  pf    the PartialFunction[T, U]
    *  @return `Some(pf(x))` if `pf isDefinedAt x`, `None` otherwise.
    */
-  def condOpt[T,U](x: T)(pf: PartialFunction[T, U]): Option[U] =
-    if (pf isDefinedAt x) Some(pf(x)) else None
+  def condOpt[T,U](x: T)(pf: PartialFunction[T, U]): Option[U] = pf.lift(x)
 
-  private case object FallBackToken
+  private[scala] case object FallBackToken
 
-  private final val fallback_pf: PartialFunction[Any, Any] = new runtime.AbstractPartialFunction[Any, Any] {
-    def _isDefinedAt(x: Any) = true
-    override def isDefinedAt(x: Any) = true
+  private[scala] final val fallback_pf: PartialFunction[Any, Any] = new runtime.AbstractPartialFunction[Any, Any] {
+    def isDefinedAt(x: Any) = true
     def apply(x: Any): Any = FallBackToken
   }
 }

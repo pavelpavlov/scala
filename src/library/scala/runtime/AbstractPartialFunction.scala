@@ -8,45 +8,35 @@
 
 package scala.runtime
 
-import scala.annotation.unchecked.uncheckedVariance
+abstract class AbstractPartialFunction[-T1, +R] extends AbstractFunction1[T1, R] with PartialFunction[T1, R]
 
 /** This class provides a default implementation of partial functions
  *  that is used for all partial function literals.
  *  It contains an optimized `orElse` method which supports
  *  chained `orElse` in linear time, and with no slow-down
  *  if the `orElse` part is not needed.
- *  The implementation of `orElse` works by cloning the abstract function object
- *  and modifying a private `fallBack` variable that encodes the `getorElse` part.
  */
-abstract class AbstractPartialFunction[-T1, +R]
-    extends AbstractFunction1[T1, R]
-    with PartialFunction[T1, R]
-    with Cloneable {
+abstract class ComposablePartialFunction[-T1, +R]
+    extends AbstractPartialFunction[T1, R] { self =>
 
-  private var fallBackField: PartialFunction[T1 @uncheckedVariance, R @uncheckedVariance] = _
+  def apply(x: T1): R = applyOrElse(x, PartialFunction.empty)
 
-  def fallBack: PartialFunction[T1, R] = synchronized {
-    if (fallBackField eq null) fallBackField = PartialFunction.empty
-    fallBackField
-  }
+  def applyOrElse[A1 <: T1, B1 >: R](x: T1, fallBack: PartialFunction[A1, B1]): B1
 
-  override protected def missingCase(x: T1): R = fallBack(x)
-
-  // Question: Need to ensure that fallBack is overwritten before any access
-  // Is the `synchronized` here the right thing to achieve this?
-  // Is there a cheaper way?
-  override def orElse[A1 <: T1, B1 >: R](that: PartialFunction[A1, B1]) : PartialFunction[A1, B1] = {
-    val result = this.clone.asInstanceOf[AbstractPartialFunction[A1, B1]]
-    result.synchronized {
-      result.fallBackField = if (this.fallBackField eq null) that else this.fallBackField orElse that
-      result
-    }
-  }
-
-  def isDefinedAt(x: T1): scala.Boolean = _isDefinedAt(x) || fallBack.isDefinedAt(x)
-  def _isDefinedAt(x: T1): scala.Boolean
-
+  override def orElse[A1 <: T1, B1 >: R](that: PartialFunction[A1, B1]) : PartialFunction[A1, B1] =
+    new CompositePartialFunction[A1, B1] (self, that)
 }
 
+private[runtime] final class CompositePartialFunction[-T1, +R] (
+      final val f1: ComposablePartialFunction[T1, R],
+      final val f2: PartialFunction[T1, R] )
+    extends AbstractPartialFunction[T1, R] {
 
+  def isDefinedAt(x: T1) = f1.isDefinedAt(x) || f2.isDefinedAt(x)
+
+  def apply(x: T1) = f1.applyOrElse(x, f2)
+
+  override def orElse[A1 <: T1, B1 >: R](that: PartialFunction[A1, B1]) : PartialFunction[A1, B1] =
+    new CompositePartialFunction[A1, B1] (f1, f2 orElse that)
+}
 
