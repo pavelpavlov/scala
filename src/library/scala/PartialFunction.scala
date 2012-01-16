@@ -98,8 +98,9 @@ trait PartialFunction[-A, +B] extends (A => B) {
    *  @return  a function that takes an argument `x` to `Some(this(x))` if `this`
    *           is defined for `x`, and to `None` otherwise.
    */
-  def lift: A => Option[B] = new (A => Option[B]) {
-    def apply(x: A): Option[B] = if (isDefinedAt(x)) Some(PartialFunction.this.apply(x)) else None
+  def lift: A => Option[B] = (x: A) => (this orElse PartialFunction.fallback_pf).apply(x) match {
+    case PartialFunction.FallBackToken => None
+    case z => Some(z.asInstanceOf[B])
   }
 }
 
@@ -152,4 +153,12 @@ object PartialFunction {
    */
   def condOpt[T,U](x: T)(pf: PartialFunction[T, U]): Option[U] =
     if (pf isDefinedAt x) Some(pf(x)) else None
+
+  private case object FallBackToken
+
+  private final val fallback_pf: PartialFunction[Any, Any] = new runtime.AbstractPartialFunction[Any, Any] {
+    def _isDefinedAt(x: Any) = true
+    override def isDefinedAt(x: Any) = true
+    def apply(x: Any): Any = FallBackToken
+  }
 }
