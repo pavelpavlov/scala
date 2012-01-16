@@ -25,6 +25,13 @@ abstract class ComposablePartialFunction[-T1, +R]
 
   override def orElse[A1 <: T1, B1 >: R](that: PartialFunction[A1, B1]) : PartialFunction[A1, B1] =
     new CompositePartialFunction[A1, B1] (self, that)
+
+  override def lift: T1 => Option[R] = {
+    (x: T1) => applyOrElse(x, PartialFunction.fallback_pf) match {
+      case PartialFunction.FallBackToken => None
+      case z => Some(z.asInstanceOf[R])
+    }
+  }
 }
 
 private[runtime] final class CompositePartialFunction[-T1, +R] (
@@ -38,5 +45,13 @@ private[runtime] final class CompositePartialFunction[-T1, +R] (
 
   override def orElse[A1 <: T1, B1 >: R](that: PartialFunction[A1, B1]) : PartialFunction[A1, B1] =
     new CompositePartialFunction[A1, B1] (f1, f2 orElse that)
+
+  override def lift: T1 => Option[R] = {
+    val pf2 = f2 orElse PartialFunction.fallback_pf
+    (x: T1) => f1.applyOrElse(x, pf2) match {
+      case PartialFunction.FallBackToken => None
+      case z => Some(z.asInstanceOf[R])
+    }
+  }
 }
 
