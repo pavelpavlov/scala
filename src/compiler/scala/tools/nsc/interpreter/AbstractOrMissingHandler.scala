@@ -6,7 +6,7 @@
 package scala.tools.nsc
 package interpreter
 
-class AbstractOrMissingHandler[T](onError: String => Unit, value: T) extends scala.runtime.AbstractPartialFunction[Throwable, T] {
+class AbstractOrMissingHandler[T](onError: String => Unit, value: T) extends PartialFunction.APF[Throwable, T] {
   def isDefinedAt(t: Throwable) = t match {
     case _: AbstractMethodError     => true
     case _: NoSuchMethodError       => true
