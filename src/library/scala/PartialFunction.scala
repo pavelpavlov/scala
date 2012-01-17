@@ -68,7 +68,7 @@ trait PartialFunction[-A, +B] extends (A => B) { self =>
    *           takes `x` to `this(x)` where `this` is defined, and to `that(x)` where it is not.
    */
   def orElse[A1 <: A, B1 >: B](that: PartialFunction[A1, B1]) : PartialFunction[A1, B1] =
-    new runtime.AbstractFunctionWithDefault[A1, B1] {
+    new runtime.AbstractPartialFunction[A1, B1] with PartialFunction.WithDefault[A1, B1] {
       def isDefinedAt(x: A1) = self.isDefinedAt(x) || that.isDefinedAt(x)
       def applyOrElse[A2 <: A1, B2 >: B1](x: A2, default: A2 => B2): B2 = {
         if (self.isDefinedAt(x)) self(x)
@@ -105,24 +105,6 @@ trait PartialFunction[-A, +B] extends (A => B) { self =>
   }
 }
 
-// TODO: comment
-private[scala] //TODO: consider making it public
-trait TotalFunction[-A, +B] extends PartialFunction[A, B] { self =>
-
-  final def isDefinedAt(x: A) = true
-
-  override def orElse[A1 <: A, B1 >: B](that: PartialFunction[A1, B1]) = self
-
-  override def andThen[C](k: B => C) = new runtime.AbstractTotalFunction[A, C] {
-    def apply(x: A): C = k(self(x))
-  }
-  /* TODO when PF literals will ready replace `andThen` by:
-  override def andThen[C](k: B => C) = { case x => k(self(x)) }
-  */
-
-  override def lift = (x: A) => Some(self(x))
-}
-
 /** A few handy operations which leverage the extra bit of information
  *  available in partial functions.  Examples:
  *  {{{
@@ -139,9 +121,71 @@ trait TotalFunction[-A, +B] extends PartialFunction[A, B] { self =>
  *  @since   2.8
  */
 object PartialFunction {
-  // Composite function produced by `FunctionWithDefault#orElse` method
-  private[scala] final class OrElse[-A, +B] (
-        final val f1: FunctionWithDefault[A, B],
+
+  /** `WithDefault` reformulates all operations of its supertrait `PartialFunction`
+   *  in terms of `isDefinedAt` and `applyOrElse`.
+   *  This allows more effective implementations in many cases:
+   *  - optimized `orElse` method supports chained `orElse` in linear time,
+   *    and with no slow-down if the `orElse` part is not needed.
+   *  - optimized `lift` method helps to avoid double evaluation of pattern matchers & guards
+   *    of partial function literals.
+   *   
+   *  This trait is used as a basis for implementation of all partial function literals
+   *  with non-exhaustive matchers. It is recommended to use `WithDefault`
+   *  instead of `PartialFunction` as a base trait for user-defined partial functions.
+   *
+   *  @author  Pavel Pavlov
+   *  @since   2.10
+   */
+  trait WithDefault[-A, +B] extends PartialFunction[A, B] { self =>
+
+    def applyOrElse[A1 <: A, B1 >: B](x: A1, default: A1 => B1): B1
+
+    final def apply(x: A): B = applyOrElse(x, PartialFunction.empty)
+
+    override def orElse[A1 <: A, B1 >: B](that: PartialFunction[A1, B1]) : PartialFunction[A1, B1] = 
+      new OrElse[A1, B1] (this, that)
+
+    override def andThen[C](k: B => C) : WithDefault[A, C] =
+      new runtime.AbstractPartialFunction[A, C] with WithDefault[A, C] {
+        def isDefinedAt(x: A): Boolean = self.isDefinedAt(x)
+        def applyOrElse[A1 <: A, C1 >: C](x: A1, default: A1 => C1): C1 =
+          self.applyOrElse(x, fallback) match {
+            case FallBackToken => default(x)
+            case z => k(z.asInstanceOf[B])
+          }
+      }
+
+    override def lift: A => Option[B] = (x: A) => liftFallBack[B](applyOrElse(x, fallback))
+  }
+
+  /** `Total` is partial function which `isDefinedAt` method always returns `true`.
+   *  This trait is used as a basis for implementation of all partial function literals
+   *  with exhaustive matchers. It is recommended to use `WithDefault`
+   *
+   *  @author  Pavel Pavlov
+   *  @since   2.10
+   */
+  trait Total[-A, +B] extends PartialFunction[A, B] { self =>
+
+    final def isDefinedAt(x: A) = true
+
+    override def orElse[A1 <: A, B1 >: B](that: PartialFunction[A1, B1]) = self
+
+    override def andThen[C](k: B => C) = new runtime.AbstractPartialFunction[A, C] with Total[A, C] {
+      def apply(x: A): C = k(self(x))
+    }
+    /* TODO when PF literals will ready replace `andThen` by:
+    override def andThen[C](k: B => C) = { case x => k(self(x)) }
+    */
+
+    override def lift = (x: A) => Some(self(x))
+  }
+
+  /** Composite function produced by `WithDefault#orElse` method
+   */
+  private final class OrElse[-A, +B] (
+        final val f1: WithDefault[A, B],
         final val f2: PartialFunction[A, B] )
       extends runtime.AbstractPartialFunction[A, B] {
 
@@ -161,18 +205,21 @@ object PartialFunction {
     }
   }
 
+
   //TODO: check implementation
-  private[scala] def unlifted[A, B](f: A => Option[B]): PartialFunction[A, B] = new runtime.AbstractFunctionWithDefault[A, B] {
-    def isDefinedAt(x: A): Boolean = f(x).isDefined
-    def applyOrElse[A1 <: A, B1 >: B](x: A1, default: A1 => B1): B1 = f(x) getOrElse default(x)
-    override def lift = f
-  }
+  private[scala] def unlifted[A, B](f: A => Option[B]): PartialFunction[A, B] =
+    new runtime.AbstractPartialFunction[A, B] with WithDefault[A, B] {
+      def isDefinedAt(x: A): Boolean = f(x).isDefined
+      def applyOrElse[A1 <: A, B1 >: B](x: A1, default: A1 => B1): B1 = f(x) getOrElse default(x)
+      override def lift = f
+    }
 
   private[scala] case object FallBackToken
 
-  private[scala] final val fallback: PartialFunction[Any, Any] = new runtime.AbstractTotalFunction[Any, Any] {
-    def apply(x: Any): Any = FallBackToken
-  }
+  private[scala] final val fallback: PartialFunction[Any, Any] =
+    new runtime.AbstractPartialFunction[Any, Any] with Total[Any, Any] {
+      def apply(x: Any): Any = FallBackToken
+    }
   /* TODO when PF literals will ready replace `fallback` by:
   private[scala] final val fallback: PartialFunction[Any, Any] = { case _ => FallBackToken }
   */
@@ -182,12 +229,20 @@ object PartialFunction {
     case z => Some(z.asInstanceOf[A])
   }
 
+//  /** Converts ordinary function to partial one */
+//  def apply[A, B](f: A => B): PartialFunction[A, B] = new runtime.AbstractPartialFunction[A, B] with Total[A, B] {
+//    def apply(x: A): B = f(x)
+//  }
+//  /* TODO when PF literals will ready replace `apply` by:
+//  def apply[A, B](f: A => B): PartialFunction[A, B] = { case x => f(x) }
+//  */
+
   private[this] final val empty_pf: PartialFunction[Any, Nothing] = new runtime.AbstractPartialFunction[Any, Nothing] {
     def isDefinedAt(x: Any) = false
     def apply(x: Any) = throw new MatchError(x)
     override def orElse[A1, B1](that: PartialFunction[A1, B1]) = that
     override def andThen[C](k: Nothing => C) = this
-    override def lift = (x: Any) => None
+    override val lift = (x: Any) => None
   }
   def empty[A, B] : PartialFunction[A, B] = empty_pf
 
@@ -213,12 +268,4 @@ object PartialFunction {
    *  @return `Some(pf(x))` if `pf isDefinedAt x`, `None` otherwise.
    */
   def condOpt[T,U](x: T)(pf: PartialFunction[T, U]): Option[U] = pf.lift(x)
-
-  //TODO: comment
-  def apply[A, B](f: A => B): PartialFunction[A, B] = new runtime.AbstractTotalFunction[A, B] {
-    def apply(x: A): B = f(x)
-  }
-  /* TODO when PF literals will ready replace `apply` by:
-  def apply[A, B](f: A => B): PartialFunction[A, B] = { case x => f(x) }
-  */
 }
