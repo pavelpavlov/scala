@@ -433,7 +433,7 @@ trait ParallelMatching extends ast.TreeDSL
           case (false, false) => pivotLen == x.nonStarLength
         }
 
-        def _isDefinedAt(pat: Pattern) = pat match {
+        def isDefinedAt(pat: Pattern) = pat match {
           case x: SequenceLikePattern => seqIsDefinedAt(x)
           case WildcardPattern()      => true
           case _                      => false

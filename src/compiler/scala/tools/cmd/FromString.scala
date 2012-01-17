@@ -16,7 +16,7 @@ import scala.reflect.OptManifest
  */
 abstract class FromString[+T](implicit m: OptManifest[T]) extends scala.runtime.AbstractPartialFunction[String, T] {
   def apply(s: String): T
-  def _isDefinedAt(s: String): Boolean = true
+  def isDefinedAt(s: String): Boolean = true
   def zero: T = apply("")
 
   def targetString: String = m.toString
