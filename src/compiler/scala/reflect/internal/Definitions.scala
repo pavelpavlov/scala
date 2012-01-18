@@ -233,7 +233,8 @@ trait Definitions extends reflect.api.StandardDefinitions {
     // fundamental reference classes
     lazy val ScalaObjectClass           = getMember(ScalaPackageClass, tpnme.ScalaObject)
     lazy val PartialFunctionClass       = getRequiredClass("scala.PartialFunction")
-    lazy val AbstractPartialFunctionClass = getRequiredClass("scala.runtime.AbstractPartialFunction")
+    lazy val PFLiteralClass             = getRequiredClass("scala.runtime.PFLiteral")
+    lazy val XPFLiteralClass            = getRequiredClass("scala.runtime.XPFLiteral")
     lazy val SymbolClass                = getRequiredClass("scala.Symbol")
     lazy val StringClass                = getClass(sn.String)
     lazy val StringModule               = StringClass.linkedClassOfClass

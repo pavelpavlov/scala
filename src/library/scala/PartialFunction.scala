@@ -184,9 +184,7 @@ object PartialFunction {
 
   /** Composite function produced by `PartialFunction#orElse` method
    */
-  private final class OrElse[-A, +B] (
-        final val f1: PartialFunction[A, B],
-        final val f2: PartialFunction[A, B] )
+  private final class OrElse[-A, +B] (f1: PartialFunction[A, B], f2: PartialFunction[A, B])
       extends APF[A, B] {
 
     def isDefinedAt(x: A) = f1.isDefinedAt(x) || f2.isDefinedAt(x)
@@ -224,7 +222,7 @@ object PartialFunction {
 
     def isDefinedAt(x: A): Boolean = f(x).isDefined
     override def applyOrElse[A1 <: A, B1 >: B](x: A1, default: A1 => B1): B1 = 
-      f(x) getOrElse default(x)
+      f(x) getOrElse default(x) //TODO: check generated code and inline getOrElse if needed
     override def lift = f
   }
 
@@ -239,7 +237,7 @@ object PartialFunction {
   //TODO: check generated code for PF literal here
   def apply[A, B](f: A => B): PartialFunction[A, B] = { case x => f(x) }
 
-  private[this] final val false_f: Any => Boolean = { _ => false}
+  private[this] final val constFalse: Any => Boolean = { _ => false}
 
   private[this] final val empty_pf: PartialFunction[Any, Nothing] = new APF[Any, Nothing] {
     def isDefinedAt(x: Any) = false
@@ -248,8 +246,10 @@ object PartialFunction {
     override def andThen[C](k: Nothing => C) = this
     override val lift = (x: Any) => None
     override def run[U](x: Any)(action: Nothing => U) = false
-    override def runWith[U](action: Nothing => U) = false_f
+    override def runWith[U](action: Nothing => U) = constFalse
   }
+
+  //TODO: comment
   def empty[A, B] : PartialFunction[A, B] = empty_pf
 
   /** Creates a Boolean test based on a value and a partial function.
@@ -260,7 +260,7 @@ object PartialFunction {
    *  @param  pf  the partial function
    *  @return true, iff `x` is in the domain of `pf` and `pf(x) == true`.
    */
-  def cond[T](x: T)(pf: PartialFunction[T, Boolean]): Boolean = pf.applyOrElse(x, false_f)
+  def cond[T](x: T)(pf: PartialFunction[T, Boolean]): Boolean = pf.applyOrElse(x, constFalse)
 
   /** Transforms a PartialFunction[T, U] `pf` into Function1[T, Option[U]] `f`
    *  whose result is `Some(x)` if the argument is in `pf`'s domain and `None`

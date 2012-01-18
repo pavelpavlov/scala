@@ -492,6 +492,7 @@ abstract class TreeBuilder {
    *        if (catchFn isDefinedAt x) catchFn(x) else throw x
    *    }
    */
+  //It is worth to replace here `if (catchFn isDefinedAt x) catchFn(x) else throw x` by `catchFn.applyOrElse(x, {x => throw x})` ?
   def makeCatchFromExpr(catchExpr: Tree): CaseDef = {
     val binder   = freshTermName("x")
     val pat      = Bind(binder, Typed(Ident(nme.WILDCARD), Ident(tpnme.Throwable)))

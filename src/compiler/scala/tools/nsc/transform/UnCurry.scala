@@ -223,15 +223,14 @@ abstract class UnCurry extends InfoTransform
      *    body = expr match { case P_i if G_i => E_i }_i=1..n
      *  to:
      *
-     //TODO: correct code template below
-     *    class $anon() extends AbstractPartialFunction[T, R] with Serializable {
-     *      def apply(x: T): R = (expr: @unchecked) match {
+     *    class $anon() extends PFLiteral[T, R] with Serializable {
+     *      def applyOrElse[T1 <: T, R1 >: R](x: T1, default: T1 => R1): R1 = (expr: @unchecked) match {
      *        case P_1 if G_1 => E_1
      *        ...
-     *        case P_n if G_n => true
-     *        case _ => this.missingCase(x)
+     *        case P_n if G_n => E_n
+     *        case _ => default.apply(x)
      *      }
-     *      def isDefinedAtCurrent(x: T): boolean = (x: @unchecked) match {
+     *      def isDefinedAt(x: T): boolean = (x: @unchecked) match {
      *        case P_1 if G_1 => true
      *        ...
      *        case P_n if G_n => true
@@ -241,15 +240,24 @@ abstract class UnCurry extends InfoTransform
      *    new $anon()
      *
      *  However, if one of the patterns P_i if G_i is a default pattern,
-     *  drop the last default clause in tghe definition of `apply` and generate for `isDefinedAtCurrent` instead
+     *  then generate instead:
      *
-     *      def isDefinedAtCurrent(x: T): boolean = true
+     *    class $anon() extends XPFLiteral[T, R] with Serializable {
+     *      def apply(x: T): R = (expr: @unchecked) match {
+     *        case P_1 if G_1 => E_1
+     *        ...
+     *        case P_n if G_n => true
+     *      }
+     *    }
+     *    new $anon()
      */
     def transformFunction(fun: Function): Tree = {
       val fun1 = deEta(fun)
       def owner = fun.symbol.owner
       def targs = fun.tpe.typeArgs
       def isPartial = fun.tpe.typeSymbol == PartialFunctionClass
+      def isExhaustive = false //TODO: how to distinguish them?
+      def isApplyOrElse = isPartial && !isExhaustive
 
       if (fun1 ne fun) fun1
       else {
@@ -257,18 +265,23 @@ abstract class UnCurry extends InfoTransform
         val anonClass = owner.newAnonymousFunctionClass(fun.pos, inConstructorFlag)
         def parents =
           if (isFunctionType(fun.tpe)) List(abstractFunctionForFunctionType(fun.tpe), SerializableClass.tpe)
-          else if (isPartial) List(appliedType(AbstractPartialFunctionClass.typeConstructor, targs), SerializableClass.tpe)
+          else if (isPartial && !isExhaustive) List(appliedType(PFLiteralClass.typeConstructor, targs), SerializableClass.tpe)
+          else if (isPartial && isExhaustive) List(appliedType(XPFLiteralClass.typeConstructor, targs), SerializableClass.tpe)
           else List(ObjectClass.tpe, fun.tpe, SerializableClass.tpe)
 
         anonClass setInfo ClassInfoType(parents, new Scope, anonClass)
-        val applyMethod = anonClass.newMethod(fun.pos, nme.apply) setFlag FINAL
-        applyMethod setInfo MethodType(applyMethod newSyntheticValueParams formals, restpe)
+        val applyMethod =
+          if (!isApplyOrElse) anonClass.newMethod(fun.pos, nme.apply) setFlag FINAL
+          else anonClass.newMethod(fun.pos, nme.applyOrElse) setFlag (FINAL | OVERRIDE)
+        applyMethod setInfo MethodType(applyMethod newSyntheticValueParams formals, restpe) //TODO: add `default` param for applyOrElse
+        //TODO: what about generic params of applyOrElse?
         anonClass.info.decls enter applyMethod
         anonClass.addAnnotation(serialVersionUIDAnnotation)
 
         fun.vparams foreach (_.symbol.owner = applyMethod)
         new ChangeOwnerTraverser(fun.symbol, applyMethod) traverse fun.body
 
+        //TODO: replace by defaultCall
         def missingCaseCall(scrutinee: Tree): Tree = Apply(Select(This(anonClass), nme.missingCase), List(scrutinee))
 
         def applyMethodDef() = {
