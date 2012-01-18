@@ -62,6 +62,9 @@ trait PartialFunction[-A, +B] extends (A => B) { self =>
    */
   def applyOrElse[A1 <: A, B1 >: B](x: A1, default: A1 => B1): B1 =
     if (this isDefinedAt x) this(x) else default(x)
+  //TODO: try implement all the stuff through the triple chaining function:
+  //   def _applyChain(x, next: PF, last: F1[Any, X])
+  // it may helps in most cases
 
   /** Composes this partial function with a fallback partial function which
    *  gets applied where this partial function is not defined.
@@ -75,6 +78,7 @@ trait PartialFunction[-A, +B] extends (A => B) { self =>
    */
   def orElse[A1 <: A, B1 >: B](that: PartialFunction[A1, B1]) : PartialFunction[A1, B1] =
     new OrElse[A1, B1] (this, that)
+  //TODO: why not overload it with orElse(that: F1): F1?
 
   //TODO: do we need to override here Function1.compose as well?
 
@@ -134,7 +138,7 @@ object PartialFunction {
    */
   trait WithDefault[-A, +B] extends PartialFunction[A, B] { self =>
 
-    override def applyOrElse[A1 <: A, B1 >: B](x: A1, default: A1 => B1): B1 = _applyOrElse(x, default)
+    override final def applyOrElse[A1 <: A, B1 >: B](x: A1, default: A1 => B1): B1 = _applyOrElse(x, default)
 
     // This is ugly, but I could not find a way to make `applyOrElse` abstract here
     def _applyOrElse[A1 <: A, B1 >: B](x: A1, default: A1 => B1): B1
@@ -185,7 +189,7 @@ object PartialFunction {
     def apply(x: A) = f1.applyOrElse(x, f2)
 
     override def applyOrElse[A1 <: A, B1 >: B](x: A1, default: A1 => B1): B1 =
-      f1.applyOrElse(x, (xx: A1) => f2.applyOrElse(xx, default))
+      f1.applyOrElse(x, (xx: A1) => f2.applyOrElse(xx, default)) //TODO: try to avoid closure creation here
 
     override def orElse[A1 <: A, B1 >: B](that: PartialFunction[A1, B1]) =
       new OrElse[A1, B1] (f1, f2 orElse that)
@@ -193,8 +197,8 @@ object PartialFunction {
     override def andThen[C](k: B => C) =
       new OrElse[A, C] (f1 andThen k, f2 andThen k)
 
-    override def lift: A => Option[B] = {
-      val pf2 = f2 orElse fallback
+    override def lift: A => Option[B] = { //TODO: unify with class Lifted
+      val pf2 = f2 orElse fallback //TODO: try to avoid building another orElse chain here
       (x: A) => f1.applyOrElse(x, pf2) match {
         case FallBackToken => None
         case z => Some(z.asInstanceOf[B])

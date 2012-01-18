@@ -65,8 +65,8 @@ object FromString {
   /** Implicit as the most likely to be useful as-is.
    */
   implicit val IntFromString: FromString[Int] = new FromString[Int] {
-    override def isDefinedAt(s: String)  = safeToInt(s).isDefined
-    def apply(s: String)                 = safeToInt(s).get
+    override def isDefinedAt(s: String)   = safeToInt(s).isDefined
+    def apply(s: String)                  = safeToInt(s).get
     def safeToInt(s: String): Option[Int] = try Some(java.lang.Integer.parseInt(s)) catch { case _: NumberFormatException => None }
   }
 }
