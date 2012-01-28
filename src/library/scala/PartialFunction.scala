@@ -249,7 +249,10 @@ object PartialFunction {
     override def runWith[U](action: Nothing => U) = constFalse
   }
 
-  //TODO: comment
+  /**
+   *  TODO: comment
+   *  @since   2.10
+   */
   def empty[A, B] : PartialFunction[A, B] = empty_pf
 
   /** Creates a Boolean test based on a value and a partial function.
