@@ -295,26 +295,23 @@ abstract class UnCurry extends InfoTransform
           val m = anonClass.newMethod(fun.pos, nme.applyOrElse) setFlag (FINAL | OVERRIDE)
           val A1 = m.newTypeParameter(newTypeName("A1")) setInfo TypeBounds.upper(argtpe)
           val B1 = m.newTypeParameter(newTypeName("B1")) setInfo TypeBounds.lower(restpe)
-          val defaultType = appliedType(FunctionClass(1).typeConstructor, List(A1.typeConstructor, B1.typeConstructor))
-          val newParams = m newSyntheticValueParams List(A1.typeConstructor, defaultType)
+          val defaultType = appliedType(FunctionClass(1).typeConstructor, List(A1.tpe, B1.tpe))
+          val newParams = m newSyntheticValueParams List(A1.tpe, defaultType)
           val List(mArg, mDefault) = newParams
 
-          m setInfo polyType(List(A1, B1), MethodType(newParams, B1.typeConstructor))
+          m setInfo polyType(List(A1, B1), MethodType(newParams, B1.tpe))
           enterApplyX(m)
 
-          val substParam = new TreeSymSubstituter(List(fun.vparams.head.symbol), List(mArg))
-          def substTree[T <: Tree](t: T): T = {
-            substParam(resetLocalAttrs(t))
-          }
-
           val body = localTyper.typedPos(fun.pos) {
-            gen.mkUncheckedMatch(substTree(gen.withDefaultCase(fun.body, { _ =>
-              Apply(Select(Ident(mDefault), defaultType.member(nme.apply)), List(Ident(mArg)))
-            })))
+            Block(List(ValDef(fun.vparams.head.symbol, Ident(mArg))),
+              gen.mkUncheckedMatch(gen.withDefaultCase(fun.body, { _ =>
+                Apply(Select(Ident(mDefault), defaultType.member(nme.apply)), List(Ident(mArg)))
+              }))
+            )
           }
 
           DefDef(Modifiers(m.flags), m.name, m.typeParams map TypeDef, List(newParams map ValDef),
-            TypeTree(B1.typeConstructor), body) setSymbol m
+            TypeTree(B1.tpe), body) setSymbol m
         }
 
         def isDefinedAtMethodDef() = {
