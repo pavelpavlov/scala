@@ -262,43 +262,63 @@ abstract class UnCurry extends InfoTransform
       if (fun1 ne fun) fun1
       else {
         val (formals, restpe) = (targs.init, targs.last)
+
         val anonClass = owner.newAnonymousFunctionClass(fun.pos, inConstructorFlag)
         def parents =
           if (isFunctionType(fun.tpe)) List(abstractFunctionForFunctionType(fun.tpe), SerializableClass.tpe)
           else if (isPartial && !isExhaustive) List(appliedType(PFLiteralClass.typeConstructor, targs), SerializableClass.tpe)
           else if (isPartial && isExhaustive) List(appliedType(XPFLiteralClass.typeConstructor, targs), SerializableClass.tpe)
           else List(ObjectClass.tpe, fun.tpe, SerializableClass.tpe)
-
         anonClass setInfo ClassInfoType(parents, new Scope, anonClass)
-        val applyMethod =
-          if (!isApplyOrElse) anonClass.newMethod(fun.pos, nme.apply) setFlag FINAL
-          else anonClass.newMethod(fun.pos, nme.applyOrElse) setFlag (FINAL | OVERRIDE)
-        applyMethod setInfo MethodType(applyMethod newSyntheticValueParams formals, restpe) //TODO: add `default` param for applyOrElse
-        //TODO: what about generic params of applyOrElse?
-        anonClass.info.decls enter applyMethod
         anonClass.addAnnotation(serialVersionUIDAnnotation)
-
-        fun.vparams foreach (_.symbol.owner = applyMethod)
-        new ChangeOwnerTraverser(fun.symbol, applyMethod) traverse fun.body
-
-        //TODO: replace by defaultCall
-        def missingCaseCall(scrutinee: Tree): Tree = Apply(Select(This(anonClass), nme.missingCase), List(scrutinee))
+        
+        def enterApplyX(applyMethod: MethodSymbol) {
+          anonClass.info.decls enter applyMethod
+          fun.vparams foreach (_.symbol.owner = applyMethod)
+          new ChangeOwnerTraverser(fun.symbol, applyMethod) traverse fun.body
+        }
 
         def applyMethodDef() = {
-          val body = localTyper.typedPos(fun.pos) {
-            if (isPartial) gen.mkUncheckedMatch(gen.withDefaultCase(fun.body, missingCaseCall))
-            else fun.body
-          }
+          val m = anonClass.newMethod(fun.pos, nme.apply) setFlag FINAL
+          m setInfo MethodType(m newSyntheticValueParams formals, restpe)
+          enterApplyX(m)
+
+          val body = localTyper.typedPos(fun.pos) { gen.mkUncheckedMatch(fun.body) }
           // Have to repack the type to avoid mismatches when existentials
           // appear in the result - see SI-4869.
-          val applyResultType = localTyper.packedType(body, applyMethod)
-          DefDef(Modifiers(FINAL), nme.apply, Nil, List(fun.vparams), TypeTree(applyResultType), body) setSymbol applyMethod
+          val applyResultType = localTyper.packedType(body, m)
+          DefDef(Modifiers(m.flags), nme.apply, Nil, List(fun.vparams), TypeTree(applyResultType), body) setSymbol m
         }
-        def isDefinedAtMethodDef() = {
-          val isDefinedAtName = {
-            if (anonClass.info.member(nme._isDefinedAt) != NoSymbol) nme._isDefinedAt
-            else nme.isDefinedAt
+
+        def applyOrElseMethodDef() = {
+          val List(argtpe) = formals
+          val m = anonClass.newMethod(fun.pos, nme.applyOrElse) setFlag (FINAL | OVERRIDE)
+          val A1 = m.newTypeParameter(newTypeName("A1")) setInfo TypeBounds.upper(argtpe)
+          val B1 = m.newTypeParameter(newTypeName("B1")) setInfo TypeBounds.lower(restpe)
+          val defaultType = appliedType(FunctionClass(1).typeConstructor, List(A1.typeConstructor, B1.typeConstructor))
+          val newParams = m newSyntheticValueParams List(A1.typeConstructor, defaultType)
+          val List(mArg, mDefault) = newParams
+
+          m setInfo polyType(List(A1, B1), MethodType(newParams, B1.typeConstructor))
+          enterApplyX(m)
+
+          val substParam = new TreeSymSubstituter(List(fun.vparams.head.symbol), List(mArg))
+          def substTree[T <: Tree](t: T): T = {
+            substParam(resetLocalAttrs(t))
           }
+
+          val body = localTyper.typedPos(fun.pos) {
+            gen.mkUncheckedMatch(substTree(gen.withDefaultCase(fun.body, { _ =>
+              Apply(Select(Ident(mDefault), defaultType.member(nme.apply)), List(Ident(mArg)))
+            })))
+          }
+
+          DefDef(Modifiers(m.flags), m.name, m.typeParams map TypeDef, List(newParams map ValDef),
+            TypeTree(B1.typeConstructor), body) setSymbol m
+        }
+
+        def isDefinedAtMethodDef() = {
+          val isDefinedAtName = nme.isDefinedAt
           val m = anonClass.newMethod(fun.pos, isDefinedAtName) setFlag FINAL
           m setInfo MethodType(m newSyntheticValueParams formals, BooleanClass.tpe)
           anonClass.info.decls enter m
@@ -395,8 +415,8 @@ abstract class UnCurry extends InfoTransform
         }
 
         val members =
-          if (isPartial) List(applyMethodDef, isDefinedAtMethodDef)
-          else List(applyMethodDef)
+          if (isApplyOrElse) List(isDefinedAtMethodDef(), applyOrElseMethodDef())
+          else List(applyMethodDef())
 
         localTyper.typedPos(fun.pos) {
           Block(
