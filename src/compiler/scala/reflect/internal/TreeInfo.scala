@@ -354,6 +354,12 @@ abstract class TreeInfo {
     case _                          => false
   }
 
+  def hasDefaultCase(fun: Function): Boolean = fun.body match {
+    case Match(_, cases) => (cases exists isDefaultCase)
+    case _ => false
+    // TODO: virtpatmat support
+  }
+
   /** Does this CaseDef catch Throwable? */
   def catchesThrowable(cdef: CaseDef) = catchesAllOf(cdef, ThrowableClass.tpe)
 

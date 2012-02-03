@@ -256,7 +256,7 @@ abstract class UnCurry extends InfoTransform
       def owner = fun.symbol.owner
       def targs = fun.tpe.typeArgs
       def isPartial = fun.tpe.typeSymbol == PartialFunctionClass
-      def isExhaustive = false //TODO: how to distinguish them?
+      def isExhaustive = treeInfo.hasDefaultCase(fun)
       def isApplyOrElse = isPartial && !isExhaustive
 
       if (fun1 ne fun) fun1
