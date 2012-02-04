@@ -24,10 +24,10 @@ abstract class AbstractPartialFunction[-T1, +R] extends AbstractFunction1[T1, R]
  * This class is used as base class for partial function literals with
  * non-exhaustive pattern matchers.
  */
-abstract class PFLiteral[-T1, +R] extends AbstractPartialFunction2[T1, R] with PartialFunction.Optimized[T1, R]
+abstract class PFLiteral[-T1, +R] extends AbstractPartialFunction2[T1, R] with PartialFunction.Optimized[T1, R] with Serializable
 
 /**
  * This class is used as base class for partial function literals with
  * certainly exhaustive pattern matchers.
  */
-abstract class XPFLiteral[-T1, +R] extends AbstractPartialFunction2[T1, R] with PartialFunction.Total[T1, R]
+abstract class XPFLiteral[-T1, +R] extends AbstractPartialFunction2[T1, R] with PartialFunction.Total[T1, R] with Serializable

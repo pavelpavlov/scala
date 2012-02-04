@@ -266,9 +266,9 @@ abstract class UnCurry extends InfoTransform
       else {
         val anonClass = owner.newAnonymousFunctionClass(fun.pos, inConstructorFlag)
         def parents =
-          if (isFunctionType(fun.tpe)) List(abstractFunctionForFunctionType(fun.tpe), SerializableClass.tpe)
-          else if (isPartial && !isExhaustive) List(appliedType(PFLiteralClass.typeConstructor, targs), SerializableClass.tpe)
-          else if (isPartial && isExhaustive) List(appliedType(XPFLiteralClass.typeConstructor, targs), SerializableClass.tpe)
+          if (isFunctionType(fun.tpe)) List(abstractFunctionForFunctionType(fun.tpe))
+          else if (isPartial && !isExhaustive) List(appliedType(PFLiteralClass.typeConstructor, targs))
+          else if (isPartial && isExhaustive) List(appliedType(XPFLiteralClass.typeConstructor, targs))
           else List(ObjectClass.tpe, fun.tpe, SerializableClass.tpe)
 
         anonClass setInfo ClassInfoType(parents, newScope, anonClass)

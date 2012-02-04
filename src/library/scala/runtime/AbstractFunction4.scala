@@ -9,6 +9,6 @@
 
 package scala.runtime
 
-abstract class AbstractFunction4[-T1, -T2, -T3, -T4, +R] extends Function4[T1, T2, T3, T4, R] {
+abstract class AbstractFunction4[-T1, -T2, -T3, -T4, +R] extends Function4[T1, T2, T3, T4, R] with Serializable {
 
 }
