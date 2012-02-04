@@ -10,16 +10,6 @@ package scala.runtime
 
 abstract class AbstractPartialFunction2[-T1, +R] extends F1[T1, R] with PartialFunction[T1, R]
 
-// TEMPORARY PATCH {{{
-abstract class AbstractPartialFunction[-T1, +R] extends F1[T1, R] with PartialFunction[T1, R] {
-  protected def missingCase(x: T1): R = throw new MatchError(x)
-
-  def isDefinedAt(x: T1): scala.Boolean = _isDefinedAt(x)
-  def _isDefinedAt(x: T1): scala.Boolean
-}
-
-// }}} TEMPORARY PATCH
-
 /**
  * This class is used as base class for partial function literals with
  * non-exhaustive pattern matchers.
