@@ -209,7 +209,7 @@ object PartialFunction {
   //TODO: check generated code for PF literal here
 
   private[scala] final class Lifted[-A, +B] (val pf: PartialFunction[A, B])
-      extends runtime.AbstractFunction1[A, Option[B]] {
+      extends runtime.F1[A, Option[B]] {
 
     def apply(x: A): Option[B] = pf.applyOrElse(x, fallbackToken) match {
       case FallbackToken => None

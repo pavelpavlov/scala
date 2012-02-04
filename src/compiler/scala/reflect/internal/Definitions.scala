@@ -246,8 +246,8 @@ trait Definitions extends reflect.api.StandardDefinitions {
     // fundamental reference classes
     lazy val ScalaObjectClass           = getMember(ScalaPackageClass, tpnme.ScalaObject)
     lazy val PartialFunctionClass       = getRequiredClass("scala.PartialFunction")
-    lazy val PFLiteralClass             = getRequiredClass("scala.runtime.PFLiteral")
-    lazy val XPFLiteralClass            = getRequiredClass("scala.runtime.XPFLiteral")
+    lazy val PFLiteralClass             = getRequiredClass("scala.runtime.PF")
+    lazy val XPFLiteralClass            = getRequiredClass("scala.runtime.XPF")
     lazy val SymbolClass                = getRequiredClass("scala.Symbol")
     lazy val StringClass                = getClass(sn.String)
     lazy val StringModule               = StringClass.linkedClassOfClass
@@ -483,7 +483,7 @@ trait Definitions extends reflect.api.StandardDefinitions {
     lazy val TupleClass     = mkArityArray("Tuple", MaxTupleArity)
     lazy val ProductClass   = mkArityArray("Product", MaxProductArity)
     lazy val FunctionClass  = mkArityArray("Function", MaxFunctionArity, 0)
-    lazy val AbstractFunctionClass = mkArityArray("runtime.AbstractFunction", MaxFunctionArity, 0)
+    lazy val FunctionLiteralClass = mkArityArray("runtime.F", MaxFunctionArity, 0)
     lazy val isProductNClass = ProductClass.toSet
     def wrapArrayMethodName(elemtp: Type): TermName = elemtp.typeSymbol match {
       case ByteClass    => nme.wrapByteArray
@@ -567,9 +567,9 @@ trait Definitions extends reflect.api.StandardDefinitions {
       } else NoType
     }
 
-    def abstractFunctionForFunctionType(tp: Type) = tp.normalize match {
+    def functionLiteralForFunctionType(tp: Type) = tp.normalize match {
       case tr @ TypeRef(_, _, args) if isFunctionType(tr) =>
-        val sym = AbstractFunctionClass(args.length - 1)
+        val sym = FunctionLiteralClass(args.length - 1)
         typeRef(sym.typeConstructor.prefix, sym, args)
       case _ =>
         NoType

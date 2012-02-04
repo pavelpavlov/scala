@@ -16,11 +16,8 @@ abstract class TreeGen {
   def productConstr               = scalaDot(tpnme.Product)
   def serializableConstr          = scalaDot(tpnme.Serializable)
 
-  def scalaFunctionConstr(argtpes: List[Tree], restpe: Tree, abstractFun: Boolean = false): Tree = {
-    val cls = if (abstractFun)
-      mkAttributedRef(AbstractFunctionClass(argtpes.length))
-    else
-      mkAttributedRef(FunctionClass(argtpes.length))
+  def scalaFunctionConstr(argtpes: List[Tree], restpe: Tree): Tree = {
+    val cls = mkAttributedRef(FunctionLiteralClass(argtpes.length))
     AppliedTypeTree(cls, argtpes :+ restpe)
   }
 

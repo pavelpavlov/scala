@@ -84,7 +84,7 @@ abstract class Page {
     relativize(thisPage.path.reverse, destPath.reverse).mkString("/")
   }
 
-  def isExcluded(dtpl: DocTemplateEntity) = {
+  def isExcluded(dtpl: DocTemplateEntity) = { //TODO: AbstractFunction
     val qname = dtpl.qualifiedName
     ( ( qname.startsWith("scala.Tuple") || qname.startsWith("scala.Product") ||
        qname.startsWith("scala.Function") || qname.startsWith("scala.runtime.AbstractFunction")

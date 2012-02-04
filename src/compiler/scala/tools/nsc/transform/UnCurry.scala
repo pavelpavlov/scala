@@ -214,7 +214,7 @@ abstract class UnCurry extends InfoTransform
 
     /*  Transform a function node (x_1,...,x_n) => body of type FunctionN[T_1, .., T_N, R] to
      *
-     *    class $anon() extends AbstractFunctionN[T_1, .., T_N, R] with Serializable {
+     *    class $anon() extends scala.runtime.FN[T_1, .., T_N, R] with Serializable {
      *      def apply(x_1: T_1, ..., x_N: T_n): R = body
      *    }
      *    new $anon()
@@ -223,7 +223,7 @@ abstract class UnCurry extends InfoTransform
      *    body = x0 match { case P_i if G_i => E_i }_i=1..n
      *  to:
      *
-     *    class $anon() extends PFLiteral[A, B] with Serializable {
+     *    class $anon() extends scala.runtime.PF[A, B] with Serializable {
      *      def applyOrElse[A1 <: A, B1 >: B](x: A1, default: A1 => B1): B1 = {
      *        val x0: A = x
      *        (x0: @unchecked) match {
@@ -245,7 +245,7 @@ abstract class UnCurry extends InfoTransform
      *  However, if one of the patterns P_i if G_i is a default pattern,
      *  then generate instead:
      *
-     *    class $anon() extends XPFLiteral[A, B] with Serializable {
+     *    class $anon() extends scala.runtime.XPF[A, B] with Serializable {
      *      def apply(x: A): B = (x: @unchecked) match {
      *        case P_1 if G_1 => E_1
      *        ...
@@ -266,7 +266,7 @@ abstract class UnCurry extends InfoTransform
       else {
         val anonClass = owner.newAnonymousFunctionClass(fun.pos, inConstructorFlag)
         def parents =
-          if (isFunctionType(fun.tpe)) List(abstractFunctionForFunctionType(fun.tpe))
+          if (isFunctionType(fun.tpe)) List(functionLiteralForFunctionType(fun.tpe))
           else if (isPartial && !isExhaustive) List(appliedType(PFLiteralClass.typeConstructor, targs))
           else if (isPartial && isExhaustive) List(appliedType(XPFLiteralClass.typeConstructor, targs))
           else List(ObjectClass.tpe, fun.tpe, SerializableClass.tpe)

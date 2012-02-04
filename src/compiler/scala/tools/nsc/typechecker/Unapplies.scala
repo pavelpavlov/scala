@@ -137,7 +137,7 @@ trait Unapplies extends ast.TreeDSL
     // an abrupt crash we trim the list here.
     def primaries      = constrParamss(cdef).head take MaxFunctionArity map (_.tpt)
     def inheritFromFun = !cdef.mods.hasAbstractFlag && cdef.tparams.isEmpty && constrParamss(cdef).length == 1
-    def createFun      = gen.scalaFunctionConstr(primaries, toIdent(cdef), abstractFun = true)
+    def createFun      = gen.scalaFunctionConstr(primaries, toIdent(cdef))
     def parents        = if (inheritFromFun) List(createFun) else Nil
     def toString       = DefDef(
       Modifiers(OVERRIDE | FINAL),
