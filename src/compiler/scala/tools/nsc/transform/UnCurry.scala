@@ -168,7 +168,7 @@ abstract class UnCurry extends InfoTransform
     private def nonLocalReturnTry(body: Tree, key: Symbol, meth: Symbol) = {
       localTyper.typed {
         val extpe = nonLocalReturnExceptionType(meth.tpe.finalResultType)
-        val ex = meth.newValue(body.pos, nme.ex) setInfo extpe
+        val ex = meth.newValue(nme.ex, body.pos) setInfo extpe
         val pat = Bind(ex,
                        Typed(Ident(nme.WILDCARD),
                              AppliedTypeTree(Ident(NonLocalReturnControlClass),
@@ -219,18 +219,21 @@ abstract class UnCurry extends InfoTransform
      *    }
      *    new $anon()
      *
-     *  transform a function node (x => body) of type PartialFunction[T, R] where
-     *    body = expr match { case P_i if G_i => E_i }_i=1..n
+     *  transform a function node (x0 => body) of type PartialFunction[A, B] where
+     *    body = x0 match { case P_i if G_i => E_i }_i=1..n
      *  to:
      *
-     *    class $anon() extends PFLiteral[T, R] with Serializable {
-     *      def applyOrElse[T1 <: T, R1 >: R](x: T1, default: T1 => R1): R1 = (expr: @unchecked) match {
-     *        case P_1 if G_1 => E_1
-     *        ...
-     *        case P_n if G_n => E_n
-     *        case _ => default.apply(x)
+     *    class $anon() extends PFLiteral[A, B] with Serializable {
+     *      def applyOrElse[A1 <: A, B1 >: B](x: A1, default: A1 => B1): B1 = {
+     *        val x0: A = x
+     *        (x0: @unchecked) match {
+     *          case P_1 if G_1 => E_1
+     *          ...
+     *          case P_n if G_n => E_n
+     *          case _ => default.apply(x)
+     *        }
      *      }
-     *      def isDefinedAt(x: T): boolean = (x: @unchecked) match {
+     *      def isDefinedAt(x: A): boolean = (x: @unchecked) match {
      *        case P_1 if G_1 => true
      *        ...
      *        case P_n if G_n => true
@@ -242,11 +245,11 @@ abstract class UnCurry extends InfoTransform
      *  However, if one of the patterns P_i if G_i is a default pattern,
      *  then generate instead:
      *
-     *    class $anon() extends XPFLiteral[T, R] with Serializable {
-     *      def apply(x: T): R = (expr: @unchecked) match {
+     *    class $anon() extends XPFLiteral[A, B] with Serializable {
+     *      def apply(x: A): B = (x: @unchecked) match {
      *        case P_1 if G_1 => E_1
      *        ...
-     *        case P_n if G_n => true
+     *        case P_n if G_n => E_n
      *      }
      *    }
      *    new $anon()
@@ -261,27 +264,25 @@ abstract class UnCurry extends InfoTransform
 
       if (fun1 ne fun) fun1
       else {
-        val (formals, restpe) = (targs.init, targs.last)
-
         val anonClass = owner.newAnonymousFunctionClass(fun.pos, inConstructorFlag)
         def parents =
           if (isFunctionType(fun.tpe)) List(abstractFunctionForFunctionType(fun.tpe), SerializableClass.tpe)
           else if (isPartial && !isExhaustive) List(appliedType(PFLiteralClass.typeConstructor, targs), SerializableClass.tpe)
           else if (isPartial && isExhaustive) List(appliedType(XPFLiteralClass.typeConstructor, targs), SerializableClass.tpe)
           else List(ObjectClass.tpe, fun.tpe, SerializableClass.tpe)
-        anonClass setInfo ClassInfoType(parents, new Scope, anonClass)
-        anonClass.addAnnotation(serialVersionUIDAnnotation)
+
+        anonClass setInfo ClassInfoType(parents, newScope, anonClass)
+        anonClass addAnnotation serialVersionUIDAnnotation
         
-        def enterApplyX(applyMethod: MethodSymbol) {
-          anonClass.info.decls enter applyMethod
+        def enterApplyMethod(applyMethod: MethodSymbol, methodType: Type) {
+          applyMethod setInfoAndEnter methodType
           fun.vparams foreach (_.symbol.owner = applyMethod)
-          new ChangeOwnerTraverser(fun.symbol, applyMethod) traverse fun.body
+          fun.body.changeOwner(fun.symbol -> applyMethod)
         }
 
         def applyMethodDef() = {
-          val m = anonClass.newMethod(fun.pos, nme.apply) setFlag FINAL
-          m setInfo MethodType(m newSyntheticValueParams formals, restpe)
-          enterApplyX(m)
+          val m = anonClass.newMethod(nme.apply, fun.pos, FINAL) 
+          enterApplyMethod(m, MethodType(m newSyntheticValueParams targs.init, targs.last))
 
           val body = localTyper.typedPos(fun.pos) { gen.mkUncheckedMatch(fun.body) }
           // Have to repack the type to avoid mismatches when existentials
@@ -291,16 +292,15 @@ abstract class UnCurry extends InfoTransform
         }
 
         def applyOrElseMethodDef() = {
-          val List(argtpe) = formals
-          val m = anonClass.newMethod(fun.pos, nme.applyOrElse) setFlag (FINAL | OVERRIDE)
+          val List(argtpe, restpe) = targs
+          val m = anonClass.newMethod(nme.applyOrElse, fun.pos, FINAL | OVERRIDE)
           val A1 = m.newTypeParameter(newTypeName("A1")) setInfo TypeBounds.upper(argtpe)
           val B1 = m.newTypeParameter(newTypeName("B1")) setInfo TypeBounds.lower(restpe)
           val defaultType = appliedType(FunctionClass(1).typeConstructor, List(A1.tpe, B1.tpe))
           val newParams = m newSyntheticValueParams List(A1.tpe, defaultType)
           val List(mArg, mDefault) = newParams
 
-          m setInfo polyType(List(A1, B1), MethodType(newParams, B1.tpe))
-          enterApplyX(m)
+          enterApplyMethod(m, polyType(List(A1, B1), MethodType(newParams, B1.tpe)))
 
           val body = localTyper.typedPos(fun.pos) {
             Block(List(ValDef(fun.vparams.head.symbol, Ident(mArg))),
@@ -315,13 +315,11 @@ abstract class UnCurry extends InfoTransform
         }
 
         def isDefinedAtMethodDef() = {
-          val isDefinedAtName = nme.isDefinedAt
-          val m = anonClass.newMethod(fun.pos, isDefinedAtName) setFlag FINAL
-          m setInfo MethodType(m newSyntheticValueParams formals, BooleanClass.tpe)
-          anonClass.info.decls enter m
-          val vparam = fun.vparams.head.symbol
-          val idparam = m.paramss.head.head
-          val substParam = new TreeSymSubstituter(List(vparam), List(idparam))
+          val m      = anonClass.newMethod(nme.isDefinedAt, fun.pos, FINAL)
+          val params = m newSyntheticValueParams targs.init
+          m setInfoAndEnter MethodType(params, BooleanClass.tpe)
+
+          val substParam = new TreeSymSubstituter(fun.vparams map (_.symbol), params)
           def substTree[T <: Tree](t: T): T = substParam(resetLocalAttrs(t))
 
           // waiting here until we can mix case classes and extractors reliably (i.e., when virtpatmat becomes the default)
@@ -455,7 +453,7 @@ abstract class UnCurry extends InfoTransform
             if (tp.typeSymbol.isBottomClass) getManifest(AnyClass.tpe)
             else if (!manifestOpt.tree.isEmpty) manifestOpt.tree
             else if (tp.bounds.hi ne tp) getManifest(tp.bounds.hi)
-            else localTyper.getManifestTree(tree.pos, tp, false)
+            else localTyper.getManifestTree(tree, tp, false)
           }
           atPhase(phase.next) {
             localTyper.typedPos(pos) {
@@ -549,9 +547,9 @@ abstract class UnCurry extends InfoTransform
        */
       def liftTree(tree: Tree) = {
         debuglog("lifting tree at: " + (tree.pos))
-        val sym = currentOwner.newMethod(tree.pos, unit.freshTermName("liftedTree"))
+        val sym = currentOwner.newMethod(unit.freshTermName("liftedTree"), tree.pos)
         sym.setInfo(MethodType(List(), tree.tpe))
-        new ChangeOwnerTraverser(currentOwner, sym).traverse(tree)
+        tree.changeOwner(currentOwner -> sym)
         localTyper.typedPos(tree.pos)(Block(
           List(DefDef(sym, List(Nil), tree)),
           Apply(Ident(sym), Nil)
@@ -814,11 +812,7 @@ abstract class UnCurry extends InfoTransform
       }
 
       // create the symbol
-      val forwsym = (
-        currentClass.newMethod(dd.pos, dd.name)
-        . setFlag (VARARGS | SYNTHETIC | flatdd.symbol.flags)
-        . setInfo (forwtype)
-      )
+      val forwsym = currentClass.newMethod(dd.name, dd.pos, VARARGS | SYNTHETIC | flatdd.symbol.flags) setInfo forwtype
 
       // create the tree
       val forwtree = theTyper.typedPos(dd.pos) {

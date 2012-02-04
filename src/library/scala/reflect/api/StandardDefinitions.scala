@@ -12,9 +12,7 @@ trait StandardDefinitions { self: Universe =>
 
   abstract class AbsDefinitions {
     // outer packages and their classes
-    // Under consideration
-    // def RootPackage: Symbol
-
+    def RootPackage: Symbol // under consideration
     def RootClass: Symbol
     def EmptyPackage: Symbol
     def EmptyPackageClass: Symbol
@@ -47,6 +45,11 @@ trait StandardDefinitions { self: Universe =>
     def SymbolClass : Symbol
     def StringClass : Symbol
     def ClassClass  : Symbol
+
+    // product, tuple, function
+    def TupleClass    : Array[Symbol]
+    def ProductClass  : Array[Symbol]
+    def FunctionClass : Array[Symbol]
 
     // fundamental modules
     def PredefModule: Symbol

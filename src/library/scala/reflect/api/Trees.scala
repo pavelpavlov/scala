@@ -8,9 +8,8 @@ package api
 
 import scala.collection.mutable.ListBuffer
 
-//import scala.tools.nsc.util.{ FreshNameCreator, HashSet, SourceFile }
-
-trait Trees /*extends reflect.generic.Trees*/ { self: Universe =>
+// Syncnote: Trees are currently not thread-safe.
+trait Trees { self: Universe =>
 
   private[scala] var nodeCount = 0
 
@@ -538,6 +537,9 @@ trait Trees /*extends reflect.generic.Trees*/ { self: Universe =>
     // The symbol of a This is the class to which the this refers.
     // For instance in C.this, it would be C.
 
+  def This(sym: Symbol): Tree =
+    This(sym.name.toTypeName) setSymbol sym
+
   /** Designator <qualifier> . <name> */
   case class Select(qualifier: Tree, name: Name)
        extends RefTree
@@ -549,7 +551,7 @@ trait Trees /*extends reflect.generic.Trees*/ { self: Universe =>
     Select(qualifier, sym.name) setSymbol sym
 
   /** Identifier <name> */
-  case class Ident(name: Name) extends RefTree { }
+  case class Ident(name: Name) extends RefTree
 
   def Ident(name: String): Ident =
     Ident(newTermName(name))
