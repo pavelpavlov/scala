@@ -162,13 +162,13 @@ trait ScalaSettings extends AbsScalaSettings
   val Ybuildmanagerdebug =
                       BooleanSetting    ("-Ybuild-manager-debug", "Generate debug information for the Refined Build Manager compiler.")
   val Ytyperdebug   = BooleanSetting    ("-Ytyper-debug", "Trace all type assignments.")
+  val Yposdebug     = BooleanSetting    ("-Ypos-debug", "Trace position validation.")
   val Yinferdebug   = BooleanSetting    ("-Yinfer-debug", "Trace type inference and implicit search.")
   val Ypmatdebug    = BooleanSetting    ("-Ypmat-debug", "Trace all pattern matcher activity.")
   val Yreifycopypaste =
                       BooleanSetting    ("-Yreify-copypaste", "Dump the reified trees in copypasteable representation.")
   val Yreifydebug   = BooleanSetting    ("-Yreify-debug", "Trace reification.")
-  val Yreifytyperdebug
-                    = BooleanSetting    ("-Yreifytyper-debug", "Trace typings of reified trees.")
+  val Ymacrodebug   = BooleanSetting    ("-Ymacro-debug", "Trace macro-related activities: generation of synthetics, expansion, exceptions.")
   val Yreplsync     = BooleanSetting    ("-Yrepl-sync", "Do not use asynchronous code for repl startup")
   val Yrepldebug    = BooleanSetting    ("-Yrepl-debug", "Trace all repl activity.") .
                                           withPostSetHook(_ => interpreter.replProps.debug setValue true)
@@ -204,4 +204,7 @@ trait ScalaSettings extends AbsScalaSettings
    */
   val pluginOptions = MultiStringSetting("-P", "plugin:opt", "Pass an option to a plugin") .
                         withHelpSyntax("-P:<plugin>:<opt>")
+
+  /** Test whether this is scaladoc we're looking at */
+  def isScaladoc = false
 }

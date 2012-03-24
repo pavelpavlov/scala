@@ -17,7 +17,7 @@ abstract class TreeInfo {
   val global: SymbolTable
 
   import global._
-  import definitions.{ isVarArgsList, isCastSymbol, ThrowableClass }
+  import definitions.{ isVarArgsList, isCastSymbol, ThrowableClass, TupleClass }
 
   /* Does not seem to be used. Not sure what it does anyway.
   def isOwnerDefinition(tree: Tree): Boolean = tree match {
@@ -146,7 +146,7 @@ abstract class TreeInfo {
 
     true
   }
-  
+
   /**
    * Selects the correct parameter list when there are nested applications.
    * Given Apply(fn, args), args might correspond to any of fn.symbol's parameter
@@ -175,7 +175,7 @@ abstract class TreeInfo {
   }
   def foreachMethodParamAndArg(t: Tree)(f: (Symbol, Tree) => Unit): Unit = t match {
     case Apply(fn, args) => foreachMethodParamAndArg(applyMethodParameters(fn), args)(f)
-    case _               => 
+    case _               =>
   }
 
   /** Is symbol potentially a getter of a variable?
@@ -312,6 +312,24 @@ abstract class TreeInfo {
     case _                                       => false
   }
 
+  /** Is this tree comprised of nothing but identifiers,
+   *  but possibly in bindings or tuples? For instance
+   *
+   *    foo @ (bar, (baz, quux))
+   *
+   *  is a variable pattern; if the structure matches,
+   *  then the remainder is inevitable.
+   */
+  def isVariablePattern(tree: Tree): Boolean = tree match {
+    case Bind(name, pat)  => isVariablePattern(pat)
+    case Ident(name)      => true
+    case Apply(sel, args) =>
+      (    isReferenceToScalaMember(sel, TupleClass(args.size).name.toTermName)
+        && (args forall isVariablePattern)
+      )
+    case _ => false
+  }
+
   /** Is this argument node of the form <expr> : _* ?
    */
   def isWildcardStarArg(tree: Tree): Boolean = tree match {
@@ -446,15 +464,6 @@ abstract class TreeInfo {
       EmptyTree
   }
 
-  /** Is the tree Predef, scala.Predef, or _root_.scala.Predef?
-   */
-  def isPredefExpr(t: Tree) = t match {
-    case Ident(nme.Predef)                                          => true
-    case Select(Ident(nme.scala_), nme.Predef)                      => true
-    case Select(Select(Ident(nme.ROOTPKG), nme.scala_), nme.Predef) => true
-    case _                                                          => false
-  }
-
   /** Does list of trees start with a definition of
    *  a class of module with given name (ignoring imports)
    */
@@ -474,7 +483,7 @@ abstract class TreeInfo {
     // Top-level definition whose leading imports include Predef.
     def containsLeadingPredefImport(defs: List[Tree]): Boolean = defs match {
       case PackageDef(_, defs1) :: _ => containsLeadingPredefImport(defs1)
-      case Import(expr, _) :: rest   => isPredefExpr(expr) || containsLeadingPredefImport(rest)
+      case Import(expr, _) :: rest   => isReferenceToPredef(expr) || containsLeadingPredefImport(rest)
       case _                         => false
     }
 
@@ -485,7 +494,6 @@ abstract class TreeInfo {
     }
 
     (  isUnitInScala(body, nme.Predef)
-    || isUnitInScala(body, tpnme.ScalaObject)
     || containsLeadingPredefImport(List(body)))
   }
 

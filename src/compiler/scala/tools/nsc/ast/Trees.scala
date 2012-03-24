@@ -16,6 +16,47 @@ import scala.reflect.internal.Flags.TRAIT
 
 trait Trees extends reflect.internal.Trees { self: Global =>
 
+  def treeLine(t: Tree): String =
+    if (t.pos.isDefined && t.pos.isRange) t.pos.lineContent.drop(t.pos.column - 1).take(t.pos.end - t.pos.start + 1)
+    else t.summaryString
+
+  def treeStatus(t: Tree, enclosingTree: Tree = null) = {
+    val parent = if (enclosingTree eq null) "        " else " P#%5s".format(enclosingTree.id)
+
+    "[L%4s%8s] #%-6s %-15s %-10s // %s".format(t.pos.safeLine, parent, t.id, t.pos.show, t.shortClass, treeLine(t))
+  }
+  def treeSymStatus(t: Tree) = {
+    val line = if (t.pos.isDefined) "line %-4s".format(t.pos.safeLine) else "         "
+    "#%-5s %s %-10s // %s".format(t.id, line, t.shortClass,
+      if (t.symbol ne NoSymbol) "(" + t.symbol.fullLocationString + ")"
+      else treeLine(t)
+    )
+  }
+
+  class ValidatingPosAssigner extends PosAssigner {
+    var pos: Position = _
+    override def traverse(t: Tree) {
+      if (t eq EmptyTree) ()
+      else if (t.pos == NoPosition) super.traverse(t setPos pos)
+      else if (globalPhase.id <= currentRun.picklerPhase.id) {
+        // When we prune due to encountering a position, traverse the
+        // pruned children so we can warn about those lacking positions.
+        t.children foreach { c =>
+          if ((c eq EmptyTree) || (c eq emptyValDef)) ()
+          else if (c.pos == NoPosition) {
+            reporter.warning(t.pos, " Positioned tree has unpositioned child in phase " + globalPhase)
+            inform("parent: " + treeSymStatus(t))
+            inform(" child: " + treeSymStatus(c) + "\n")
+          }
+        }
+      }
+    }
+  }
+
+  override protected[this] lazy val posAssigner: PosAssigner =
+    if (settings.Yrangepos.value && settings.debug.value || settings.Yposdebug.value) new ValidatingPosAssigner
+    else new DefaultPosAssigner
+
   // --- additional cases --------------------------------------------------------
   /** Only used during parsing */
   case class Parens(args: List[Tree]) extends Tree
@@ -30,15 +71,15 @@ trait Trees extends reflect.internal.Trees { self: Global =>
     override def isType = definition.isType
   }
 
-  /** Either an assignment or a named argument. Only appears in argument lists,
-   *  eliminated by typecheck (doTypedApply)
-   */
-  case class AssignOrNamedArg(lhs: Tree, rhs: Tree)
-       extends TermTree
-
  /** Array selection <qualifier> . <name> only used during erasure */
   case class SelectFromArray(qualifier: Tree, name: Name, erasure: Type)
        extends TermTree with RefTree
+
+  /** Derived value class injection (equivalent to: new C(arg) after easure); only used during erasure
+   *  The class C is stored as the symbol of the tree node.
+   */
+  case class InjectDerivedValue(arg: Tree)
+       extends SymTree
 
   /** emitted by typer, eliminated by refchecks */
   case class TypeTreeWithDeferredRefCheck()(val check: () => TypeTree) extends TypTree
@@ -85,16 +126,16 @@ trait Trees extends reflect.internal.Trees { self: Global =>
     val (edefs, rest) = body span treeInfo.isEarlyDef
     val (evdefs, etdefs) = edefs partition treeInfo.isEarlyValDef
     val gvdefs = evdefs map {
-      case vdef @ ValDef(mods, name, tpt, rhs) =>
-        treeCopy.ValDef(
-          vdef.duplicate, mods, name,
-          atPos(focusPos(vdef.pos)) { TypeTree() setOriginal tpt setPos focusPos(tpt.pos) }, // atPos in case
-          EmptyTree)
+      case vdef @ ValDef(_, _, tpt, _) => copyValDef(vdef)(
+        // !!! I know "atPos in case" wasn't intentionally planted to
+        // add an air of mystery to this file, but it is the sort of
+        // comment which only its author could love.
+        tpt = atPos(focusPos(vdef.pos))(TypeTree() setOriginal tpt setPos focusPos(tpt.pos)), // atPos in case
+        rhs = EmptyTree
+      )
     }
-    val lvdefs = evdefs map {
-      case vdef @ ValDef(mods, name, tpt, rhs) =>
-        treeCopy.ValDef(vdef, Modifiers(PRESUPER), name, tpt, rhs)
-    }
+    val lvdefs = evdefs collect { case vdef: ValDef => copyValDef(vdef)(mods = Modifiers(PRESUPER)) }
+
     val constrs = {
       if (constrMods hasFlag TRAIT) {
         if (body forall treeInfo.isInterfaceMember) List()
@@ -114,13 +155,11 @@ trait Trees extends reflect.internal.Trees { self: Global =>
             DefDef(constrMods, nme.CONSTRUCTOR, List(), vparamss1, TypeTree(), Block(lvdefs ::: List(superCall), Literal(Constant())))))
       }
     }
-    // println("typed template, gvdefs = "+gvdefs+", parents = "+parents+", constrs = "+constrs)
     constrs foreach (ensureNonOverlapping(_, parents ::: gvdefs))
-    // vparamss2 are used as field definitions for the class. remove defaults
-    val vparamss2 = vparamss map (vps => vps map { vd =>
-      treeCopy.ValDef(vd, vd.mods &~ DEFAULTPARAM, vd.name, vd.tpt, EmptyTree)
-    })
-    Template(parents, self, gvdefs ::: vparamss2.flatten ::: constrs ::: etdefs ::: rest)
+    // Field definitions for the class - remove defaults.
+    val fieldDefs = vparamss.flatten map (vd => copyValDef(vd)(mods = vd.mods &~ DEFAULTPARAM, rhs = EmptyTree))
+
+    Template(parents, self, gvdefs ::: fieldDefs ::: constrs ::: etdefs ::: rest)
   }
 
   /** Construct class definition with given class symbol, value parameters,
@@ -155,10 +194,10 @@ trait Trees extends reflect.internal.Trees { self: Global =>
       traverser.traverseTrees(ts)
     case DocDef(comment, definition) =>
       traverser.traverse(definition)
-    case AssignOrNamedArg(lhs, rhs) =>
-      traverser.traverse(lhs); traverser.traverse(rhs)
     case SelectFromArray(qualifier, selector, erasure) =>
       traverser.traverse(qualifier)
+    case InjectDerivedValue(arg) =>
+      traverser.traverse(arg)
     case ReferenceToBoxed(idt) =>
       traverser.traverse(idt)
     case TypeTreeWithDeferredRefCheck() =>
@@ -168,8 +207,8 @@ trait Trees extends reflect.internal.Trees { self: Global =>
 
   trait TreeCopier extends super.TreeCopierOps {
     def DocDef(tree: Tree, comment: DocComment, definition: Tree): DocDef
-    def AssignOrNamedArg(tree: Tree, lhs: Tree, rhs: Tree): AssignOrNamedArg
     def SelectFromArray(tree: Tree, qualifier: Tree, selector: Name, erasure: Type): SelectFromArray
+    def InjectDerivedValue(tree: Tree, arg: Tree): InjectDerivedValue
     def ReferenceToBoxed(tree: Tree, idt: Ident): ReferenceToBoxed
     def TypeTreeWithDeferredRefCheck(tree: Tree): TypeTreeWithDeferredRefCheck
   }
@@ -180,10 +219,10 @@ trait Trees extends reflect.internal.Trees { self: Global =>
   class StrictTreeCopier extends super.StrictTreeCopier with TreeCopier {
     def DocDef(tree: Tree, comment: DocComment, definition: Tree) =
       new DocDef(comment, definition).copyAttrs(tree)
-    def AssignOrNamedArg(tree: Tree, lhs: Tree, rhs: Tree) =
-      new AssignOrNamedArg(lhs, rhs).copyAttrs(tree)
     def SelectFromArray(tree: Tree, qualifier: Tree, selector: Name, erasure: Type) =
       new SelectFromArray(qualifier, selector, erasure).copyAttrs(tree)
+    def InjectDerivedValue(tree: Tree, arg: Tree) =
+      new InjectDerivedValue(arg)
     def ReferenceToBoxed(tree: Tree, idt: Ident) =
       new ReferenceToBoxed(idt).copyAttrs(tree)
     def TypeTreeWithDeferredRefCheck(tree: Tree) = tree match {
@@ -197,15 +236,15 @@ trait Trees extends reflect.internal.Trees { self: Global =>
       if (comment0 == comment) && (definition0 == definition) => t
       case _ => this.treeCopy.DocDef(tree, comment, definition)
     }
-    def AssignOrNamedArg(tree: Tree, lhs: Tree, rhs: Tree) = tree match {
-      case t @ AssignOrNamedArg(lhs0, rhs0)
-      if (lhs0 == lhs) && (rhs0 == rhs) => t
-      case _ => this.treeCopy.AssignOrNamedArg(tree, lhs, rhs)
-    }
     def SelectFromArray(tree: Tree, qualifier: Tree, selector: Name, erasure: Type) = tree match {
       case t @ SelectFromArray(qualifier0, selector0, _)
       if (qualifier0 == qualifier) && (selector0 == selector) => t
       case _ => this.treeCopy.SelectFromArray(tree, qualifier, selector, erasure)
+    }
+    def InjectDerivedValue(tree: Tree, arg: Tree) = tree match {
+      case t @ InjectDerivedValue(arg0)
+      if (arg0 == arg) => t
+      case _ => this.treeCopy.InjectDerivedValue(tree, arg)
     }
     def ReferenceToBoxed(tree: Tree, idt: Ident) = tree match {
       case t @ ReferenceToBoxed(idt0)
@@ -232,11 +271,12 @@ trait Trees extends reflect.internal.Trees { self: Global =>
   override protected def xtransform(transformer: super.Transformer, tree: Tree): Tree = tree match {
     case DocDef(comment, definition) =>
       transformer.treeCopy.DocDef(tree, comment, transformer.transform(definition))
-    case AssignOrNamedArg(lhs, rhs) =>
-     transformer.treeCopy.AssignOrNamedArg(tree, transformer.transform(lhs), transformer.transform(rhs))
     case SelectFromArray(qualifier, selector, erasure) =>
       transformer.treeCopy.SelectFromArray(
         tree, transformer.transform(qualifier), selector, erasure)
+    case InjectDerivedValue(arg) =>
+      transformer.treeCopy.InjectDerivedValue(
+        tree, transformer.transform(arg))
     case ReferenceToBoxed(idt) =>
       transformer.treeCopy.ReferenceToBoxed(
         tree, transformer.transform(idt) match { case idt1: Ident => idt1 })
@@ -269,12 +309,27 @@ trait Trees extends reflect.internal.Trees { self: Global =>
    *  (bq:) This transformer has mutable state and should be discarded after use
    */
   private class ResetAttrs(localOnly: Boolean) {
+    val debug = settings.debug.value
+    val trace = scala.tools.nsc.util.trace when debug
+
     val locals = util.HashSet[Symbol](8)
+    val orderedLocals = collection.mutable.ListBuffer[Symbol]()
+    def registerLocal(sym: Symbol) {
+      if (sym != null && sym != NoSymbol) {
+        if (debug && !(locals contains sym)) orderedLocals append sym
+        locals addEntry sym
+      }
+    }
 
     class MarkLocals extends self.Traverser {
-      def markLocal(tree: Tree) =
-        if (tree.symbol != null && tree.symbol != NoSymbol)
-          locals addEntry tree.symbol
+      def markLocal(tree: Tree) {
+        if (tree.symbol != null && tree.symbol != NoSymbol) {
+          val sym = tree.symbol
+          registerLocal(sym)
+          registerLocal(sym.sourceModule)
+          registerLocal(sym.moduleClass)
+        }
+      }
 
       override def traverse(tree: Tree) = {
         tree match {
@@ -319,9 +374,12 @@ trait Trees extends reflect.internal.Trees { self: Global =>
     def transform[T <: Tree](x: T): T = {
       new MarkLocals().traverse(x)
 
-      val trace = scala.tools.nsc.util.trace when settings.debug.value
-      val eoln = System.getProperty("line.separator")
-      trace("locals (%d total): %n".format(locals.size))(locals.toList map {"  " + _} mkString eoln)
+      if (debug) {
+        assert(locals.size == orderedLocals.size)
+        val eoln = System.getProperty("line.separator")
+        val msg = orderedLocals.toList filter {_ != NoSymbol} map {"  " + _} mkString eoln
+        trace("locals (%d total): %n".format(orderedLocals.size))(msg)
+      }
 
       val x1 = new Transformer().transform(x)
       assert(x.getClass isInstance x1)
@@ -333,9 +391,9 @@ trait Trees extends reflect.internal.Trees { self: Global =>
 
    case Parens(expr)                                               (only used during parsing)
    case DocDef(comment, defn) =>                                   (eliminated by typer)
-   case AssignOrNamedArg(lhs, rhs) =>                              (eliminated by typer)
    case TypeTreeWithDeferredRefCheck() =>                          (created and eliminated by typer)
    case SelectFromArray(_, _, _) =>                                (created and eliminated by erasure)
+   case InjectDerivedValue(_) =>                                   (created and eliminated by erasure)
 
   */
 

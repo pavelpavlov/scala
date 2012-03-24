@@ -16,7 +16,7 @@ class Universe extends SymbolTable {
 
   val gen = new TreeGen { val global: Universe.this.type = Universe.this }
 
-  def settings = new Settings
+  lazy val settings = new Settings
   def forInteractive = false
   def forScaladoc = false
 
@@ -37,6 +37,17 @@ class Universe extends SymbolTable {
   type Position = String // source file?
   val NoPosition = ""
 
+  definitions.AnyValClass // force it.
+
+  type TreeAnnotation = Position
+  val NoTreeAnnotation: TreeAnnotation = NoPosition
+  def positionToAnnotation(pos: Position): TreeAnnotation = pos // TODO
+  def annotationToPosition(annot: TreeAnnotation): Position = annot //TODO
+
   // establish root association to avoid cyclic dependency errors later
   classToScala(classOf[java.lang.Object]).initialize
+
+//  println("initializing definitions")
+  definitions.init()
+
 }

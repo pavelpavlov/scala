@@ -80,9 +80,7 @@ class HtmlFactory(val universe: doc.Universe, index: doc.Index) {
     "selected.png",
     "selected2-right.png",
     "selected2.png",
-    "unselected.png",
-
-    "rootdoc.txt"
+    "unselected.png"
   )
 
   /** Generates the Scaladoc site for a model into the site root.
@@ -121,7 +119,7 @@ class HtmlFactory(val universe: doc.Universe, index: doc.Index) {
 
     def writeTemplate(tpl: DocTemplateEntity) {
       if (!(written contains tpl)) {
-        writeForThis(new page.Template(tpl))
+        writeForThis(new page.Template(universe, tpl))
         written += tpl
         tpl.templates map writeTemplate
       }

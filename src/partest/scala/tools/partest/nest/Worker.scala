@@ -55,6 +55,7 @@ class ScalaCheckFileManager(val origmanager: FileManager) extends FileManager {
   var LATEST_LIB: String = origmanager.LATEST_LIB
   var LATEST_COMP: String = origmanager.LATEST_COMP
   var LATEST_PARTEST: String = origmanager.LATEST_PARTEST
+  var LATEST_ACTORS: String = origmanager.LATEST_ACTORS
 }
 
 object Output {
@@ -520,7 +521,9 @@ class Worker(val fileManager: FileManager, params: TestRunParams) extends Actor 
       runTestCommon(file, expectFailure = false)((logFile, outDir) => {
         val dir      = file.getParentFile
 
-        execTest(outDir, logFile) && diffCheck(compareOutput(dir, logFile))
+        // adding code.jar to the classpath (to provide Code.lift services for reification tests)
+        execTest(outDir, logFile, PathSettings.srcCodeLib.toString) &&
+        diffCheck(compareOutput(dir, logFile))
       })
 
     // Apache Ant 1.6 or newer

@@ -44,6 +44,11 @@ trait TreeDSL {
     def NULL          = LIT(null)
     def UNIT          = LIT(())
 
+    // for those preferring boring, predictable lives, without the thrills of tree-sharing
+    // (but with the perk of typed trees)
+    def TRUE_typed  = LIT(true) setType ConstantType(Constant(true))
+    def FALSE_typed = LIT(false) setType ConstantType(Constant(false))
+
     object WILD {
       def empty               = Ident(nme.WILDCARD)
       def apply(tpe: Type)    = Ident(nme.WILDCARD) setType tpe
@@ -253,13 +258,11 @@ trait TreeDSL {
     }
 
     /** Top level accessible. */
-    def MATCHERROR(arg: Tree) = Throw(New(TypeTree(MatchErrorClass.tpe), List(List(arg))))
-    /** !!! should generalize null guard from match error here. */
-    def THROW(sym: Symbol): Throw = Throw(New(TypeTree(sym.tpe), List(Nil)))
-    def THROW(sym: Symbol, msg: Tree): Throw = Throw(New(TypeTree(sym.tpe), List(List(msg.TOSTRING()))))
+    def MATCHERROR(arg: Tree) = Throw(MatchErrorClass.tpe, arg)
+    def THROW(sym: Symbol, msg: Tree): Throw = Throw(sym.tpe, msg.TOSTRING())
 
     def NEW(tpt: Tree, args: Tree*): Tree   = New(tpt, List(args.toList))
-    def NEW(sym: Symbol, args: Tree*): Tree = New(sym, args: _*)
+    def NEW(sym: Symbol, args: Tree*): Tree = New(sym.tpe, args: _*)
 
     def DEF(name: Name, tp: Type): DefTreeStart     = DEF(name) withType tp
     def DEF(name: Name): DefTreeStart               = new DefTreeStart(name)

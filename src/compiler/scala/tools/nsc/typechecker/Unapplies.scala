@@ -22,7 +22,7 @@ trait Unapplies extends ast.TreeDSL
   import treeInfo.{ isRepeatedParamType, isByNameParamType }
 
   private val unapplyParamName = nme.x_0
-  
+
   /** returns type list for return type of the extraction */
   def unapplyTypeList(ufn: Symbol, ufntpe: Type) = {
     assert(ufn.isMethod, ufn)
@@ -45,6 +45,11 @@ trait Unapplies extends ast.TreeDSL
       case BooleanClass             => Nil
       case OptionClass | SomeClass  =>
         val prod  = tp.typeArgs.head
+// the spec doesn't allow just any subtype of Product, it *must* be TupleN[...] -- see run/virtpatmat_extends_product.scala
+// this breaks plenty of stuff, though...
+//        val targs =
+//          if (isTupleType(prod)) getProductArgs(prod)
+//          else List(prod)
         val targs = getProductArgs(prod)
 
         if (targs.isEmpty || targs.tail.isEmpty) List(prod) // special n == 0 ||  n == 1
@@ -151,11 +156,10 @@ trait Unapplies extends ast.TreeDSL
   }
 
   def companionModuleDef(cdef: ClassDef, parents: List[Tree] = Nil, body: List[Tree] = Nil): ModuleDef = atPos(cdef.pos.focus) {
-    val allParents = parents :+ gen.scalaScalaObjectConstr
     ModuleDef(
       Modifiers(cdef.mods.flags & AccessFlags | SYNTHETIC, cdef.mods.privateWithin),
       cdef.name.toTermName,
-      Template(allParents, emptyValDef, NoMods, Nil, List(Nil), body, cdef.impl.pos.focus))
+      Template(parents, emptyValDef, NoMods, Nil, List(Nil), body, cdef.impl.pos.focus))
   }
 
   private val caseMods = Modifiers(SYNTHETIC | CASE)

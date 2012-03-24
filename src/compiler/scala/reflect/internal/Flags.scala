@@ -107,7 +107,7 @@ class ModifierFlags {
                                           // pre: PRIVATE or PROTECTED are also set
   final val JAVA          = 0x00100000    // symbol was defined by a Java class
   final val STATIC        = 0x00800000    // static field, method or class
-  final val CASEACCESSOR  = 0x01000000    // symbol is a case parameter (or its accessor)
+  final val CASEACCESSOR  = 0x01000000    // symbol is a case parameter (or its accessor, or a GADT skolem)
   final val TRAIT         = 0x02000000    // symbol is a trait
   final val DEFAULTPARAM  = 0x02000000    // the parameter has a default value
   final val PARAMACCESSOR = 0x20000000    // for field definitions generated for primary constructor
@@ -165,6 +165,7 @@ class Flags extends ModifierFlags {
   final val TRIEDCOOKING  = 0x100000000000L // ``Cooking'' has been tried on this symbol
                                             // A Java method's type is ``cooked'' by transforming raw types to existentials
 
+  final val SYNCHRONIZED  = 0x200000000000L // symbol is a method which should be marked ACC_SYNCHRONIZED
   // ------- shift definitions -------------------------------------------------------
 
   final val InitialFlags  = 0x0001FFFFFFFFFFFFL // flags that are enabled from phase 1.
@@ -222,7 +223,7 @@ class Flags extends ModifierFlags {
   /** These modifiers appear in TreePrinter output. */
   final val PrintableFlags: Long =
     ExplicitFlags | LOCAL | SYNTHETIC | STABLE | CASEACCESSOR | MACRO |
-    ACCESSOR | SUPERACCESSOR | PARAMACCESSOR | BRIDGE | STATIC | VBRIDGE | SPECIALIZED
+    ACCESSOR | SUPERACCESSOR | PARAMACCESSOR | BRIDGE | STATIC | VBRIDGE | SPECIALIZED | SYNCHRONIZED
 
   /** The two bridge flags */
   final val BridgeFlags = BRIDGE | VBRIDGE
@@ -384,7 +385,7 @@ class Flags extends ModifierFlags {
     case             VBRIDGE => "<vbridge>"                           // (1L << 42)
     case             VARARGS => "<varargs>"                           // (1L << 43)
     case        TRIEDCOOKING => "<triedcooking>"                      // (1L << 44)
-    case     0x200000000000L => ""                                    // (1L << 45)
+    case        SYNCHRONIZED => "<synchronized>"                      // (1L << 45)
     case     0x400000000000L => ""                                    // (1L << 46)
     case     0x800000000000L => ""                                    // (1L << 47)
     case    0x1000000000000L => ""                                    // (1L << 48)
@@ -466,43 +467,44 @@ class Flags extends ModifierFlags {
   }
   protected final val rawFlagPickledOrder: Array[Long] = pickledListOrder.toArray
 
-  def flagOfModifier(mod: Modifier.Value): Long = mod match {
-    case Modifier.`protected` => PROTECTED
-    case Modifier.`private` => PRIVATE
-    case Modifier.`override` => OVERRIDE
-    case Modifier.`abstract` => ABSTRACT
-    case Modifier.`final`=> FINAL
-    case Modifier.`sealed`=> SEALED
-    case Modifier.`implicit`=> IMPLICIT
-    case Modifier.`lazy`=> LAZY
-    case Modifier.`case`=> CASE
-    case Modifier.`trait`=> TRAIT
-    case Modifier.deferred => DEFERRED
-    case Modifier.interface => INTERFACE
-    case Modifier.mutable => MUTABLE
-    case Modifier.parameter => PARAM
-    case Modifier.`macro` => MACRO
-    case Modifier.covariant => COVARIANT
-    case Modifier.contravariant => CONTRAVARIANT
-    case Modifier.preSuper => PRESUPER
+  def flagOfModifier(mod: Modifier): Long = mod match {
+    case Modifier.`protected`      => PROTECTED
+    case Modifier.`private`        => PRIVATE
+    case Modifier.`override`       => OVERRIDE
+    case Modifier.`abstract`       => ABSTRACT
+    case Modifier.`final`          => FINAL
+    case Modifier.`sealed`         => SEALED
+    case Modifier.`implicit`       => IMPLICIT
+    case Modifier.`lazy`           => LAZY
+    case Modifier.`case`           => CASE
+    case Modifier.`trait`          => TRAIT
+    case Modifier.deferred         => DEFERRED
+    case Modifier.interface        => INTERFACE
+    case Modifier.mutable          => MUTABLE
+    case Modifier.parameter        => PARAM
+    case Modifier.`macro`          => MACRO
+    case Modifier.covariant        => COVARIANT
+    case Modifier.contravariant    => CONTRAVARIANT
+    case Modifier.preSuper         => PRESUPER
     case Modifier.abstractOverride => ABSOVERRIDE
-    case Modifier.local => LOCAL
-    case Modifier.java => JAVA
-    case Modifier.static => STATIC
-    case Modifier.caseAccessor => CASEACCESSOR
+    case Modifier.local            => LOCAL
+    case Modifier.java             => JAVA
+    case Modifier.static           => STATIC
+    case Modifier.caseAccessor     => CASEACCESSOR
     case Modifier.defaultParameter => DEFAULTPARAM
-    case Modifier.defaultInit => DEFAULTINIT
-    case Modifier.paramAccessor => PARAMACCESSOR
-    case Modifier.bynameParameter => BYNAMEPARAM
+    case Modifier.defaultInit      => DEFAULTINIT
+    case Modifier.paramAccessor    => PARAMACCESSOR
+    case Modifier.bynameParameter  => BYNAMEPARAM
+    case _                         => 0
   }
 
-  def flagsOfModifiers(mods: List[Modifier.Value]): Long =
+  def flagsOfModifiers(mods: List[Modifier]): Long =
     (mods :\ 0L) { (mod, curr) => curr | flagOfModifier(mod) }
 
-  def modifierOfFlag(flag: Long): Option[Modifier.Value] =
+  def modifierOfFlag(flag: Long): Option[Modifier] =
     Modifier.values find { mod => flagOfModifier(mod) == flag }
 
-  def modifiersOfFlags(flags: Long): List[Modifier.Value] =
+  def modifiersOfFlags(flags: Long): List[Modifier] =
     pickledListOrder map (mask => modifierOfFlag(flags & mask)) flatMap { mod => mod }
 }
 

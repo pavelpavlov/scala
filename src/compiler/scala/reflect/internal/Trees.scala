@@ -11,6 +11,18 @@ import api.Modifier
 
 trait Trees extends api.Trees { self: SymbolTable =>
 
+  // Belongs in TreeInfo but then I can't reach it from TreePrinters.
+  def isReferenceToScalaMember(t: Tree, Id: Name) = t match {
+    case Ident(Id)                                          => true
+    case Select(Ident(nme.scala_), Id)                      => true
+    case Select(Select(Ident(nme.ROOTPKG), nme.scala_), Id) => true
+    case _                                                  => false
+  }
+  /** Is the tree Predef, scala.Predef, or _root_.scala.Predef?
+   */
+  def isReferenceToPredef(t: Tree) = isReferenceToScalaMember(t, nme.Predef)
+  def isReferenceToAnyVal(t: Tree) = isReferenceToScalaMember(t, tpnme.AnyVal)
+
   // --- modifiers implementation ---------------------------------------
 
   /** @param privateWithin the qualifier for a private (a type name)
@@ -72,9 +84,9 @@ trait Trees extends api.Trees { self: SymbolTable =>
     def withPosition(flag: Long, position: Position) =
       copy() setPositions positions + (flag -> position)
 
-    override def hasModifier(mod: Modifier.Value) =
+    override def hasModifier(mod: Modifier) =
       hasFlag(flagOfModifier(mod))
-    override def allModifiers: Set[Modifier.Value] =
+    override def modifiers: Set[Modifier] =
       Modifier.values filter hasModifier
     override def mapAnnotations(f: List[Tree] => List[Tree]): Modifiers =
       Modifiers(flags, privateWithin, f(annotations)) setPositions positions
@@ -85,7 +97,7 @@ trait Trees extends api.Trees { self: SymbolTable =>
   def Modifiers(flags: Long, privateWithin: Name): Modifiers = Modifiers(flags, privateWithin, List())
   def Modifiers(flags: Long): Modifiers = Modifiers(flags, tpnme.EMPTY)
 
-  def Modifiers(mods: Set[Modifier.Value],
+  def Modifiers(mods: Set[Modifier],
                 privateWithin: Name,
                 annotations: List[Tree]): Modifiers = {
     val flagSet = mods map flagOfModifier
@@ -121,12 +133,15 @@ trait Trees extends api.Trees { self: SymbolTable =>
         new ChangeOwnerTraverser(oldOwner, newOwner) apply t
       }
     }
-    
-    def substTreeSyms(pairs: (Symbol, Symbol)*): Tree = {
-      val list  = pairs.toList
-      val subst = new TreeSymSubstituter(list map (_._1), list map (_._2))
-      subst(tree)
-    }
+
+    def substTreeSyms(pairs: (Symbol, Symbol)*): Tree =
+      substTreeSyms(pairs.map(_._1).toList, pairs.map(_._2).toList)
+
+    def substTreeSyms(from: List[Symbol], to: List[Symbol]): Tree =
+      new TreeSymSubstituter(from, to)(tree)
+
+    def substTreeThis(clazz: Symbol, to: Tree): Tree = new ThisSubstituter(clazz, to) transform tree
+
     def shallowDuplicate: Tree = new ShallowDuplicator(tree) transform tree
     def shortClass: String = tree.getClass.getName split "[.$]" last
 
@@ -189,7 +204,7 @@ trait Trees extends api.Trees { self: SymbolTable =>
   def DefDef(sym: Symbol, mods: Modifiers, vparamss: List[List[ValDef]], rhs: Tree): DefDef =
     atPos(sym.pos) {
       assert(sym != NoSymbol)
-      DefDef(Modifiers(sym.flags),
+      DefDef(mods,
              sym.name.toTermName,
              sym.typeParams map TypeDef,
              vparamss,
@@ -224,30 +239,23 @@ trait Trees extends api.Trees { self: SymbolTable =>
       LabelDef(sym.name.toTermName, params map Ident, rhs) setSymbol sym
     }
 
-
   /** casedef shorthand */
   def CaseDef(pat: Tree, body: Tree): CaseDef = CaseDef(pat, EmptyTree, body)
 
   def Bind(sym: Symbol, body: Tree): Bind =
     Bind(sym.name, body) setSymbol sym
 
+  def Try(body: Tree, cases: (Tree, Tree)*): Try =
+    Try(body, cases.toList map { case (pat, rhs) => CaseDef(pat, EmptyTree, rhs) }, EmptyTree)
 
-  /** Factory method for object creation `new tpt(args_1)...(args_n)`
-   *  A `New(t, as)` is expanded to: `(new t).<init>(as)`
-   */
-  def New(tpt: Tree, argss: List[List[Tree]]): Tree = {
-    assert(!argss.isEmpty)
-    val superRef: Tree = Select(New(tpt), nme.CONSTRUCTOR)
-    (superRef /: argss) (Apply)
-  }
-  /** 0-1 argument list new, based on a symbol.
-   */
-  def New(sym: Symbol, args: Tree*): Tree =
-    if (args.isEmpty) New(TypeTree(sym.tpe))
-    else New(TypeTree(sym.tpe), List(args.toList))
+  def Throw(tpe: Type, args: Tree*): Throw =
+    Throw(New(tpe, args: _*))
 
   def Apply(sym: Symbol, args: Tree*): Tree =
     Apply(Ident(sym), args.toList)
+
+  def New(sym: Symbol, args: Tree*): Tree =
+    New(sym.tpe, args: _*)
 
   def Super(sym: Symbol, mix: TypeName): Tree = Super(This(sym), mix)
 
@@ -275,12 +283,29 @@ trait Trees extends api.Trees { self: SymbolTable =>
     }
   }
 
-  private object posAssigner extends Traverser {
+  trait PosAssigner extends Traverser {
+    var pos: Position
+  }
+  protected[this] lazy val posAssigner: PosAssigner = new DefaultPosAssigner
+
+  protected class DefaultPosAssigner extends PosAssigner {
     var pos: Position = _
     override def traverse(t: Tree) {
-      if (t != EmptyTree && t.pos == NoPosition) {
+      if (t eq EmptyTree) ()
+      else if (t.pos == NoPosition) {
         t.setPos(pos)
-        super.traverse(t) // TODO: bug? shouldn't the traverse be outside of the if?
+        super.traverse(t)   // TODO: bug? shouldn't the traverse be outside of the if?
+        // @PP: it's pruning whenever it encounters a node with a
+        // position, which I interpret to mean that (in the author's
+        // mind at least) either the children of a positioned node will
+        // already be positioned, or the children of a positioned node
+        // do not merit positioning.
+        //
+        // Whatever the author's rationale, it does seem like a bad idea
+        // to press on through a positioned node to find unpositioned
+        // children beneath it and then to assign whatever happens to
+        // be in `pos` to such nodes. There are supposed to be some
+        // position invariants which I can't imagine surviving that.
       }
     }
   }
@@ -299,10 +324,14 @@ trait Trees extends api.Trees { self: SymbolTable =>
   }
 
   class ChangeOwnerTraverser(val oldowner: Symbol, val newowner: Symbol) extends Traverser {
-    def changeOwner(tree: Tree) = {
-      if ((tree.isDef || tree.isInstanceOf[Function]) &&
-          tree.symbol != NoSymbol && tree.symbol.owner == oldowner)
-        tree.symbol.owner = newowner
+    def changeOwner(tree: Tree) = tree match {
+      case Return(expr) =>
+        if (tree.symbol == oldowner)
+          tree.symbol = newowner
+      case _: DefTree | _: Function =>
+        if (tree.symbol != NoSymbol && tree.symbol.owner == oldowner)
+          tree.symbol.owner = newowner
+      case _ =>
     }
     override def traverse(tree: Tree) {
       changeOwner(tree)
@@ -321,8 +350,9 @@ trait Trees extends api.Trees { self: SymbolTable =>
     "subst[%s, %s](%s)".format(fromStr, toStr, (from, to).zipped map (_ + " -> " + _) mkString ", ")
   }
 
-  // NOTE: if symbols in `from` occur multiple times in the `tree` passed to `transform`,
-  // the resulting Tree will be a graph, not a tree... this breaks all sorts of stuff,
+  // NOTE: calls shallowDuplicate on trees in `to` to avoid problems when symbols in `from`
+  // occur multiple times in the `tree` passed to `transform`,
+  // otherwise, the resulting Tree would be a graph, not a tree... this breaks all sorts of stuff,
   // notably concerning the mutable aspects of Trees (such as setting their .tpe)
   class TreeSubstituter(from: List[Symbol], to: List[Tree]) extends Transformer {
     override def transform(tree: Tree): Tree = tree match {
@@ -336,6 +366,19 @@ trait Trees extends api.Trees { self: SymbolTable =>
         super.transform(tree)
     }
     override def toString = substituterString("Symbol", "Tree", from, to)
+  }
+
+  /** Substitute clazz.this with `to`. `to` must be an attributed tree. 
+   */
+  class ThisSubstituter(clazz: Symbol, to: => Tree) extends Transformer {
+    val newtpe = to.tpe
+    override def transform(tree: Tree) = {
+      if (tree.tpe ne null) tree.tpe = tree.tpe.substThis(clazz, newtpe)
+      tree match {
+        case This(_) if tree.symbol == clazz => to
+        case _ => super.transform(tree)
+      }
+    }
   }
 
   class TypeMapTreeSubstituter(val typeMap: TypeMap) extends Traverser {

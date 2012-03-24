@@ -29,12 +29,13 @@ abstract class TreeBuilder {
   def rootId(name: Name)       = gen.rootId(name)
   def rootScalaDot(name: Name) = gen.rootScalaDot(name)
   def scalaDot(name: Name)     = gen.scalaDot(name)
-  def scalaAnyRefConstr        = gen.scalaAnyRefConstr
-  def scalaUnitConstr          = gen.scalaUnitConstr
-  def scalaScalaObjectConstr   = gen.scalaScalaObjectConstr
-  def productConstr            = gen.productConstr
+  def scalaAnyRefConstr        = scalaDot(tpnme.AnyRef)
+  def scalaAnyValConstr        = scalaDot(tpnme.AnyVal)
+  def scalaAnyConstr           = scalaDot(tpnme.Any)
+  def scalaUnitConstr          = scalaDot(tpnme.Unit)
+  def productConstr            = scalaDot(tpnme.Product)
   def productConstrN(n: Int)   = scalaDot(newTypeName("Product" + n))
-  def serializableConstr       = gen.serializableConstr
+  def serializableConstr       = scalaDot(tpnme.Serializable)
 
   def convertToTypeName(t: Tree) = gen.convertToTypeName(t)
 
@@ -261,29 +262,25 @@ abstract class TreeBuilder {
     else if (stats.length == 1) stats.head
     else Block(stats.init, stats.last)
 
+  def makeFilter(tree: Tree, condition: Tree, scrutineeName: String): Tree = {
+    val cases = List(
+      CaseDef(condition, EmptyTree, Literal(Constant(true))),
+      CaseDef(Ident(nme.WILDCARD), EmptyTree, Literal(Constant(false)))
+    )
+    val matchTree = makeVisitor(cases, false, scrutineeName)
+
+    atPos(tree.pos)(Apply(Select(tree, nme.withFilter), matchTree :: Nil))
+  }
+
   /** Create tree for for-comprehension generator <val pat0 <- rhs0> */
   def makeGenerator(pos: Position, pat: Tree, valeq: Boolean, rhs: Tree): Enumerator = {
     val pat1 = patvarTransformer.transform(pat)
     val rhs1 =
-      if (valeq) rhs
-      else matchVarPattern(pat1) match {
-        case Some(_) =>
-          rhs
-        case None =>
-          atPos(rhs.pos) {
-            Apply(
-              Select(rhs, nme.filter),
-              List(
-                makeVisitor(
-                  List(
-                    CaseDef(pat1.duplicate, EmptyTree, Literal(Constant(true))),
-                    CaseDef(Ident(nme.WILDCARD), EmptyTree, Literal(Constant(false)))),
-                  false,
-                  nme.CHECK_IF_REFUTABLE_STRING
-                )))
-          }
-      }
-    if (valeq) ValEq(pos, pat1, rhs1) else ValFrom(pos, pat1, rhs1)
+      if (valeq || treeInfo.isVariablePattern(pat)) rhs
+      else makeFilter(rhs, pat1.duplicate, nme.CHECK_IF_REFUTABLE_STRING)
+
+    if (valeq) ValEq(pos, pat1, rhs1)
+    else ValFrom(pos, pat1, rhs1)
   }
 
   def makeParam(pname: TermName, tpe: Tree) =
@@ -470,15 +467,11 @@ abstract class TreeBuilder {
   def makeVisitor(cases: List[CaseDef], checkExhaustive: Boolean): Tree =
     makeVisitor(cases, checkExhaustive, "x$")
 
-  private def makeUnchecked(expr: Tree): Tree = atPos(expr.pos) {
-    Annotated(New(scalaDot(definitions.UncheckedClass.name), List(Nil)), expr)
-  }
-
   /** Create visitor <x => x match cases> */
   def makeVisitor(cases: List[CaseDef], checkExhaustive: Boolean, prefix: String): Tree = {
-    val x = freshTermName(prefix)
-    val id = Ident(x)
-    val sel = if (checkExhaustive) id else makeUnchecked(id)
+    val x   = freshTermName(prefix)
+    val id  = Ident(x)
+    val sel = if (checkExhaustive) id else gen.mkUnchecked(id)
     Function(List(makeSyntheticParam(x)), Match(sel, cases))
   }
 
@@ -564,7 +557,7 @@ abstract class TreeBuilder {
       val vars = getVariables(pat1)
       val matchExpr = atPos((pat1.pos union rhs.pos).makeTransparent) {
         Match(
-          makeUnchecked(rhs),
+          gen.mkUnchecked(rhs),
           List(
             atPos(pat1.pos) {
               CaseDef(pat1, EmptyTree, makeTupleTerm(vars map (_._1) map Ident, true))
