@@ -2206,8 +2206,6 @@ trait Typers extends Modes with Adaptations with PatMatVirtualiser {
       val casesTrue = if (isPartial) cases map (c => deriveCaseDef(c)(x => TRUE_typed).duplicate) else Nil
 
       val applyMethod = {
-        // rig the show so we can get started typing the method body -- later we'll correct the infos...
-        anonClass setInfo ClassInfoType(List(ObjectClass.tpe, pt, SerializableClass.tpe), newScope, anonClass)
         val methodSym = anonClass.newMethod(nme.apply, tree.pos, FINAL)
         val (paramSyms, selector) = mkParams(methodSym)
         methodSym setInfoAndEnter MethodType(paramSyms, AnyClass.tpe)
@@ -2218,23 +2216,42 @@ trait Typers extends Modes with Adaptations with PatMatVirtualiser {
         val (selector1, selectorTp, casesAdapted, resTp, doTranslation) = methodBodyTyper.prepareTranslateMatch(selector, cases, mode, ptRes)
 
         val formalTypes = paramSyms map (_.tpe)
-        val parents =
-          if (isPartial) List(appliedType(AbstractPartialFunctionClass.typeConstructor, List(formalTypes.head, resTp)), SerializableClass.tpe)
-          else           List(appliedType(AbstractFunctionClass(arity).typeConstructor, formalTypes :+ resTp), SerializableClass.tpe)
+        val parents = List(appliedType(AbstractFunctionClass(arity).typeConstructor, formalTypes :+ resTp), SerializableClass.tpe)
 
         anonClass setInfo ClassInfoType(parents, newScope, anonClass)
         methodSym setInfoAndEnter MethodType(paramSyms, resTp)
 
-        // use apply's parameter since the scrut's type has been widened
+        val body = methodBodyTyper.translateMatch(selector1, selectorTp, casesAdapted, resTp, doTranslation, None)
+
+        DefDef(methodSym, body)
+      }
+
+      val applyOrElseMethod = {
+        val methodSym = anonClass.newMethod(nme.applyOrElse, tree.pos, FINAL | OVERRIDE)
+        val (paramSyms, selector) = mkParams(methodSym)
+        methodSym setInfoAndEnter MethodType(paramSyms, AnyClass.tpe)
+
+        val methodBodyTyper = newTyper(context.makeNewScope(context.tree, methodSym)) // should use the DefDef for the context's tree, but it doesn't exist yet (we need the typer we're creating to create it)
+        paramSyms foreach (methodBodyTyper.context.scope enter _)
+
+        val (selector1, selectorTp, casesAdapted, resTp, doTranslation) = methodBodyTyper.prepareTranslateMatch(selector, cases, mode, ptRes)
+
+        val formalTypes = paramSyms map (_.tpe)
+        val parents = List(appliedType(PFLiteralClass.typeConstructor, List(formalTypes.head, resTp)), SerializableClass.tpe)
+
+        anonClass setInfo ClassInfoType(parents, newScope, anonClass)
+        methodSym setInfoAndEnter MethodType(paramSyms, resTp)
+
+        // use applyOrElse's parameter since the scrut's type has been widened
         def missingCase(scrut_ignored: Tree) = (funThis DOT nme.missingCase) (REF(paramSyms.head))
 
-        val body = methodBodyTyper.translateMatch(selector1, selectorTp, casesAdapted, resTp, doTranslation, if (isPartial) Some(missingCase) else None)
+        val body = methodBodyTyper.translateMatch(selector1, selectorTp, casesAdapted, resTp, doTranslation, Some(missingCase))
 
         DefDef(methodSym, body)
       }
 
       def isDefinedAtMethod = {
-        val methodSym = anonClass.newMethod(nme._isDefinedAt, tree.pos, FINAL)
+        val methodSym = anonClass.newMethod(nme.isDefinedAt, tree.pos, FINAL)
         val (paramSyms, selector) = mkParams(methodSym)
         val methodBodyTyper = newTyper(context.makeNewScope(context.tree, methodSym)) // should use the DefDef for the context's tree, but it doesn't exist yet (we need the typer we're creating to create it)
         paramSyms foreach (methodBodyTyper.context.scope enter _)
@@ -2246,7 +2263,10 @@ trait Typers extends Modes with Adaptations with PatMatVirtualiser {
         DefDef(methodSym, body)
       }
 
-      val members = if (!isPartial) List(applyMethod) else List(applyMethod, isDefinedAtMethod)
+      // rig the show so we can get started typing the method body -- later we'll correct the infos...
+      anonClass setInfo ClassInfoType(List(ObjectClass.tpe, pt, SerializableClass.tpe), newScope, anonClass)
+
+      val members = if (!isPartial) List(applyMethod) else List(applyOrElseMethod, isDefinedAtMethod)
       typed(Block(List(ClassDef(anonClass, NoMods, List(List()), List(List()), members, tree.pos)), New(anonClass.tpe)), mode, pt)
     }
 
